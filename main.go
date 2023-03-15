@@ -128,6 +128,15 @@ func genconf(args []string) {
 	}{Network: nw, Self: us})
 }
 
+func ping(args []string) {
+	did, _ := strconv.Atoi(args[0])
+	port, _ := strconv.Atoi(args[1])
+
+	if err := rv.Ping(context.Background(), int64(did), port); err != nil {
+		die("couldn't ping: %v", err)
+	}
+}
+
 func login(args []string) {
 	if err := rv.Login(context.Background(), args[0], args[1]); err != nil {
 		die("failed to login: %v", err)
@@ -178,5 +187,7 @@ func main() {
 		join(os.Args[2:])
 	case "leave":
 		leave(os.Args[2:])
+	case "ping":
+		ping(os.Args[2:])
 	}
 }
