@@ -28,9 +28,16 @@ type API struct {
 }
 
 const (
-	EndpointLogin        Endpoint = "/auth"
+	EndpointLogin Endpoint = "/auth"
+
 	EndpointListDevices  Endpoint = "/list/devices"
 	EndpointListNetworks Endpoint = "/list/networks"
+
+	EndpointNewDevice  Endpoint = "/new/device"
+	EndpointNewNetwork Endpoint = "/new/network"
+
+	EndpointDeviceJoin  Endpoint = "/device/join"
+	EndpointDeviceLeave Endpoint = "/device/leave"
 )
 
 func (h httpError) Error() string {
@@ -64,7 +71,40 @@ func makeGetJSONResp[T any](ep Endpoint) func(a *API, ctx context.Context) (T, e
 			return data, err
 		}
 
-		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Authorization", "Bearer "+a.Token)
+
+		res, err := a.HTTP.Do(req)
+		if err != nil {
+			return data, err
+		}
+		defer res.Body.Close()
+
+		if res.StatusCode == 204 {
+			return data, nil
+		} else if res.StatusCode != 200 {
+			return data, readError(res)
+		}
+
+		err = json.NewDecoder(res.Body).Decode(&data)
+		return data, err
+	}
+}
+
+func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Context, bodyData T) (R, error) {
+	return func(a *API, ctx context.Context, bodyData T) (R, error) {
+		var data R
+
+		body, err := encodeJSON(bodyData)
+		if err != nil {
+			return data, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", a.Endpoint(ep), body)
+		if err != nil {
+			return data, err
+		}
+
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+a.Token)
 
 		res, err := a.HTTP.Do(req)
@@ -122,9 +162,19 @@ func (a *API) Login(ctx context.Context, username, password string) error {
 	return nil
 }
 
+type njl struct {
+	Device  int64
+	Network int64
+}
+
 var (
 	listDevices  = makeGetJSONResp[[]Device](EndpointListDevices)
 	listNetworks = makeGetJSONResp[[]Network](EndpointListNetworks)
+
+	newDevice    = makePostJSONResp[Device, Device](EndpointNewDevice)
+	newNetwork   = makePostJSONResp[Network, Network](EndpointNewNetwork)
+	joinNetwork  = makePostJSONResp[njl, interface{}](EndpointDeviceJoin)
+	leaveNetwork = makePostJSONResp[njl, interface{}](EndpointDeviceLeave)
 )
 
 // Devices returns a list of devices attached to your user.
@@ -132,3 +182,25 @@ func (a *API) Devices(ctx context.Context) ([]Device, error) { return listDevice
 
 // Network returns a list of networks attached to your user.
 func (a *API) Networks(ctx context.Context) ([]Network, error) { return listNetworks(a, ctx) }
+
+// NewDevice adds a new device to the user.
+func (a *API) NewDevice(ctx context.Context, name, key string) (Device, error) {
+	return newDevice(a, ctx, Device{Name: name, PublicKey: key})
+}
+
+// NewNetwork adds a new network to the user.
+func (a *API) NewNetwork(ctx context.Context, name string) (Network, error) {
+	return newNetwork(a, ctx, Network{Name: name})
+}
+
+// JoinNetwork joins a device to a network.
+func (a *API) JoinNetwork(ctx context.Context, dev, nw int64) error {
+	_, err := joinNetwork(a, ctx, njl{dev, nw})
+	return err
+}
+
+// LeaveNetwork removes a device from a network
+func (a *API) LeaveNetwork(ctx context.Context, dev, nw int64) error {
+	_, err := leaveNetwork(a, ctx, njl{dev, nw})
+	return err
+}

@@ -1,0 +1,12 @@
+{{- define "wireguard" -}}
+[Interface]
+PrivateKey = {{.Self.PrivateKey}}
+Address = {{.Self.IP}}/128
+{{- range .Devices}}
+{{if eq .PublicKey $.Self.PublicKey}}{{continue}}{{end -}}
+[Peer]
+PublicKey = {{.PublicKey}}
+AllowedIPs = {{.IP}}/128
+{{if .Endpoint}}Endpoint = {{.Endpoint}}{{end}}
+{{- end -}}
+{{end -}}

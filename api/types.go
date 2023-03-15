@@ -21,7 +21,7 @@ type Network struct {
 type Device struct {
 	ID    int64  `json:"id"`
 	Owner int64  `json:"owner"`
-	Name  string `json:"name,omitempty"`
+	Name  string `json:"name"`
 
 	// PublicKey is the WireGuard public key for this device.
 	PublicKey string `json:"key"`
@@ -29,7 +29,11 @@ type Device struct {
 	// IP is the Pikonet IP, which likely means a random IP in the range
 	// fd00::/32.
 	// This IP is not routable by the Internet, and only by Pikonet nodes.
-	IP string `json:"ip"`
+	IP string `json:"ip,omitempty"`
 
-	Networks []Network `json:"networks"`
+	Endpoint string `json:"endpoint,omitempty"`
+
+	Networks []Network `json:"networks,omitempty"`
+
+	PrivateKey string `json:"-"`
 }

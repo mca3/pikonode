@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/mca3/pikonode/api"
 )
@@ -12,6 +14,9 @@ import (
 var serverAddress = "http://localhost:8080/api"
 var token = "1"
 var rv *api.API
+var ourDevid = 2
+var ourPkey = ""
+var ourPrivkey = ""
 
 func die(f string, d ...any) {
 	fmt.Fprintf(os.Stderr, f+"\n", d...)
@@ -57,6 +62,72 @@ func list(args []string) {
 	}
 }
 
+func newcmd(args []string) {
+	switch args[0] {
+	case "device", "dev", "d":
+		if _, err := rv.NewDevice(context.Background(), args[1], args[2]); err != nil {
+			die("couldn't add device: %v", err)
+		}
+	case "network", "net", "nw":
+		if _, err := rv.NewNetwork(context.Background(), args[1]); err != nil {
+			die("couldn't add network: %v", err)
+		}
+	}
+}
+
+func join(args []string) {
+	did, _ := strconv.Atoi(args[0])
+	nid, _ := strconv.Atoi(args[1])
+
+	if err := rv.JoinNetwork(context.Background(), int64(did), int64(nid)); err != nil {
+		die("couldn't join network: %v", err)
+	}
+}
+
+func leave(args []string) {
+	did, _ := strconv.Atoi(args[0])
+	nid, _ := strconv.Atoi(args[1])
+
+	if err := rv.LeaveNetwork(context.Background(), int64(did), int64(nid)); err != nil {
+		die("couldn't leave network: %v", err)
+	}
+}
+
+func genconf(args []string) {
+	id, _ := strconv.Atoi(args[0])
+	nws, err := rv.Networks(context.Background())
+	var nw api.Network
+	if err != nil {
+		die("failed to list networks: %v", err)
+	}
+
+	for _, v := range nws {
+		if v.ID == int64(id) {
+			nw = v
+			break
+		}
+	}
+
+	var us api.Device
+
+	for _, v := range nw.Devices {
+		if v.ID == int64(ourDevid) {
+			us = v
+		}
+	}
+
+	us.PrivateKey = ourPrivkey
+
+	if nw.ID == 0 || us.ID == 0 {
+		panic("unknown network")
+	}
+
+	tmpl.ExecuteTemplate(os.Stdout, "wireguard", struct {
+		api.Network
+		Self api.Device
+	}{Network: nw, Self: us})
+}
+
 func login(args []string) {
 	if err := rv.Login(context.Background(), args[0], args[1]); err != nil {
 		die("failed to login: %v", err)
@@ -76,6 +147,18 @@ func main() {
 		serverAddress = sa
 	}
 
+	pk, err := os.ReadFile("pubkey")
+	if err != nil {
+		panic(err)
+	}
+	ourPkey = strings.TrimSuffix(string(pk), "\n")
+
+	privk, err := os.ReadFile("privkey")
+	if err != nil {
+		panic(err)
+	}
+	ourPrivkey = strings.TrimSuffix(string(privk), "\n")
+
 	rv = &api.API{
 		Server: serverAddress,
 		Token:  token,
@@ -87,5 +170,13 @@ func main() {
 		list(os.Args[2:])
 	case "login":
 		login(os.Args[2:])
+	case "genconf":
+		genconf(os.Args[2:])
+	case "new":
+		newcmd(os.Args[2:])
+	case "join":
+		join(os.Args[2:])
+	case "leave":
+		leave(os.Args[2:])
 	}
 }
