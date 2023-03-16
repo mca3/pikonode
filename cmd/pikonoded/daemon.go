@@ -35,6 +35,31 @@ func getRuntimeDir() string {
 	return runtimeDir
 }
 
+func startup(ctx context.Context) error {
+	if err := config.ReadConfigFile(); err != nil {
+		return fmt.Errorf("failed to load config file: %w", err)
+	}
+
+	dir := getRuntimeDir()
+	unixSocket = filepath.Join(dir, fmt.Sprintf("pikonet.%d", os.Getpid()))
+
+	if err := bindUnix(ctx); err != nil {
+		return fmt.Errorf("failed to create UNIX socket: %w", err)
+	}
+	log.Printf("UNIX socket is at %v", unixSocket)
+
+	if err := createWireguard(ctx); err != nil {
+		return fmt.Errorf("failed to create WireGuard interface: %w", err)
+	}
+	log.Printf("WireGuard interface is %v. Listen port is %d.", config.Cfg.InterfaceName, config.Cfg.ListenPort)
+
+	if err := createPikorv(ctx); err != nil {
+		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -43,28 +68,18 @@ func main() {
 		log.Printf("Running with root privileges!")
 	}
 
-	if err := config.ReadConfigFile(); err != nil {
-		log.Fatalf("Failed to load config file: %v", err)
-	}
-
-	dir := getRuntimeDir()
-	unixSocket = filepath.Join(dir, fmt.Sprintf("pikonet.%d", os.Getpid()))
-
-	if err := bindUnix(ctx); err != nil {
-		log.Fatalf("Failed to create UNIX socket: %v", err)
-	}
-	log.Printf("UNIX socket is at %v", unixSocket)
-
-	if err := createWireguard(ctx); err != nil {
-		log.Fatalf("Failed to create WireGuard interface: %v", err)
-	}
-	log.Printf("WireGuard interface is %v. Listen port is %d.", config.Cfg.InterfaceName, config.Cfg.ListenPort)
-
-	// Wait until we receive a SIGINT
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, os.Interrupt)
+
+	if err := startup(ctx); err != nil {
+		log.Printf("Failed to start: %v", err)
+		goto done
+	}
+
+	// Wait until we receive a SIGINT
 	<-sigchan
 
+done:
 	log.Printf("Exiting.")
 
 	cancel()

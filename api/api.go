@@ -39,6 +39,11 @@ const (
 	EndpointDeviceJoin  Endpoint = "/device/join"
 	EndpointDeviceLeave Endpoint = "/device/leave"
 	EndpointDevicePing  Endpoint = "/device/ping"
+	EndpointDeviceInfo  Endpoint = "/device/info"
+)
+
+var (
+	ErrNotFound = httpError(404)
 )
 
 func (h httpError) Error() string {
@@ -63,14 +68,23 @@ func encodeJSON(data any) (io.Reader, error) {
 }
 
 // abuses generics to generate code for responses that just return JSON data
-func makeGetJSONResp[T any](ep Endpoint) func(a *API, ctx context.Context) (T, error) {
-	return func(a *API, ctx context.Context) (T, error) {
+func makeGetJSONResp[T any](ep Endpoint) func(a *API, ctx context.Context, q ...any) (T, error) {
+	return func(a *API, ctx context.Context, q ...any) (T, error) {
 		var data T
 
 		req, err := http.NewRequestWithContext(ctx, "GET", a.Endpoint(ep), nil)
 		if err != nil {
 			return data, err
 		}
+
+		qe := req.URL.Query()
+		for len(q) != 0 {
+			k, v := fmt.Sprint(q[0]), fmt.Sprint(q[1])
+			q = q[2:]
+
+			qe.Set(k, v)
+		}
+		req.URL.RawQuery = qe.Encode()
 
 		req.Header.Set("Authorization", "Bearer "+a.Token)
 
@@ -91,8 +105,8 @@ func makeGetJSONResp[T any](ep Endpoint) func(a *API, ctx context.Context) (T, e
 	}
 }
 
-func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Context, bodyData T) (R, error) {
-	return func(a *API, ctx context.Context, bodyData T) (R, error) {
+func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Context, bodyData T, q ...any) (R, error) {
+	return func(a *API, ctx context.Context, bodyData T, q ...any) (R, error) {
 		var data R
 
 		body, err := encodeJSON(bodyData)
@@ -104,6 +118,15 @@ func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Contex
 		if err != nil {
 			return data, err
 		}
+
+		qe := req.URL.Query()
+		for len(q) != 0 {
+			k, v := fmt.Sprint(q[0]), fmt.Sprint(q[1])
+			q = q[2:]
+
+			qe.Set(k, v)
+		}
+		req.URL.RawQuery = qe.Encode()
 
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+a.Token)
@@ -178,6 +201,7 @@ type devping struct {
 var (
 	listDevices  = makeGetJSONResp[[]Device](EndpointListDevices)
 	listNetworks = makeGetJSONResp[[]Network](EndpointListNetworks)
+	infoDevice   = makeGetJSONResp[Device](EndpointDeviceInfo)
 
 	newDevice    = makePostJSONResp[Device, Device](EndpointNewDevice)
 	newNetwork   = makePostJSONResp[Network, Network](EndpointNewNetwork)
@@ -189,6 +213,11 @@ var (
 
 // Devices returns a list of devices attached to your user.
 func (a *API) Devices(ctx context.Context) ([]Device, error) { return listDevices(a, ctx) }
+
+// Device returns info for one specific device.
+func (a *API) Device(ctx context.Context, id int64) (Device, error) {
+	return infoDevice(a, ctx, "id", id)
+}
 
 // Network returns a list of networks attached to your user.
 func (a *API) Networks(ctx context.Context) ([]Network, error) { return listNetworks(a, ctx) }

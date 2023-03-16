@@ -28,7 +28,7 @@ type wgMsg struct {
 	Type   wgMsgType
 	IP     string
 	Remove bool
-	Key    string
+	Key    wgtypes.Key
 }
 
 // nlWireguard implements netlink.Link, as there is no native way to do this in
