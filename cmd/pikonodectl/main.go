@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mca3/pikonode/api"
+	"github.com/mca3/pikonode/internal/config"
 )
 
 var rv *api.API
@@ -23,7 +24,7 @@ func ping(args []string) {
 		die("usage: %s ping [device id] <port>", os.Args[0])
 	}
 
-	did := int(cfg.DeviceID)
+	did := int(config.Cfg.DeviceID)
 
 	if len(args) >= 2 {
 		var err error
@@ -55,14 +56,14 @@ func login(args []string) {
 
 	fmt.Printf("token: %v\n", rv.Token)
 
-	cfg.Token = rv.Token
-	if err := saveConfigFile(); err != nil {
+	config.Cfg.Token = rv.Token
+	if err := config.SaveConfigFile(); err != nil {
 		die("failed to save config: %v", err)
 	}
 }
 
 func main() {
-	if err := readConfigFile(); err != nil {
+	if err := config.ReadConfigFile(); err != nil {
 		die("failed to read config file: %v", err)
 	}
 
@@ -94,8 +95,8 @@ func main() {
 	}
 
 	rv = &api.API{
-		Server: cfg.Rendezvous,
-		Token:  cfg.Token,
+		Server: config.Cfg.Rendezvous,
+		Token:  config.Cfg.Token,
 		HTTP:   http.DefaultClient,
 	}
 

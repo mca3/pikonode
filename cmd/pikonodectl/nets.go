@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/mca3/pikonode/api"
+	"github.com/mca3/pikonode/internal/config"
 )
 
 func join(args []string) {
@@ -74,12 +75,12 @@ func genconf(args []string) {
 	var us api.Device
 
 	for _, v := range nw.Devices {
-		if v.ID == int64(cfg.DeviceID) {
+		if v.ID == int64(config.Cfg.DeviceID) {
 			us = v
 		}
 	}
 
-	us.PrivateKey = cfg.PrivateKey
+	us.PrivateKey = config.Cfg.PrivateKey
 
 	if nw.ID == 0 || us.ID == 0 {
 		die("unknown network")
