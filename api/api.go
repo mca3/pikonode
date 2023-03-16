@@ -114,7 +114,9 @@ func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Contex
 		}
 		defer res.Body.Close()
 
-		if res.StatusCode != 200 {
+		if res.StatusCode == 204 {
+			return data, nil
+		} else if res.StatusCode != 200 {
 			return data, readError(res)
 		}
 

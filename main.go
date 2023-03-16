@@ -11,126 +11,33 @@ import (
 	"github.com/mca3/pikonode/api"
 )
 
-var serverAddress = "http://localhost:8080/api"
-var token = "1"
 var rv *api.API
-var ourDevid = 2
-var ourPkey = ""
-var ourPrivkey = ""
 
 func die(f string, d ...any) {
 	fmt.Fprintf(os.Stderr, f+"\n", d...)
 	os.Exit(1)
 }
 
-func list(args []string) {
-	switch args[0] {
-	case "networks", "network", "nets", "net", "nws", "nw":
-		nws, err := rv.Networks(context.Background())
-		if err != nil {
-			die("failed to list networks: %v", err)
-		}
-
-		for i, v := range nws {
-			fmt.Printf("network id %d name \"%s\"\n", v.ID, v.Name)
-			for _, v := range v.Devices {
-				fmt.Printf("- device id %d name \"%s\"\n", v.ID, v.Name)
-			}
-
-			if i != len(nws)-1 {
-				fmt.Println()
-			}
-		}
-	case "devices", "device", "devs", "dev", "ds", "d":
-		devs, err := rv.Devices(context.Background())
-		if err != nil {
-			die("failed to list devices: %v", err)
-		}
-
-		for i, v := range devs {
-			fmt.Printf("device id %d name \"%s\"\n", v.ID, v.Name)
-			for _, v := range v.Networks {
-				fmt.Printf("- network id %d name \"%s\"\n", v.ID, v.Name)
-			}
-
-			if i != len(devs)-1 {
-				fmt.Println()
-			}
-		}
-	default:
-		die("can list devices and networks")
-	}
-}
-
-func newcmd(args []string) {
-	switch args[0] {
-	case "device", "dev", "d":
-		if _, err := rv.NewDevice(context.Background(), args[1], args[2]); err != nil {
-			die("couldn't add device: %v", err)
-		}
-	case "network", "net", "nw":
-		if _, err := rv.NewNetwork(context.Background(), args[1]); err != nil {
-			die("couldn't add network: %v", err)
-		}
-	}
-}
-
-func join(args []string) {
-	did, _ := strconv.Atoi(args[0])
-	nid, _ := strconv.Atoi(args[1])
-
-	if err := rv.JoinNetwork(context.Background(), int64(did), int64(nid)); err != nil {
-		die("couldn't join network: %v", err)
-	}
-}
-
-func leave(args []string) {
-	did, _ := strconv.Atoi(args[0])
-	nid, _ := strconv.Atoi(args[1])
-
-	if err := rv.LeaveNetwork(context.Background(), int64(did), int64(nid)); err != nil {
-		die("couldn't leave network: %v", err)
-	}
-}
-
-func genconf(args []string) {
-	id, _ := strconv.Atoi(args[0])
-	nws, err := rv.Networks(context.Background())
-	var nw api.Network
-	if err != nil {
-		die("failed to list networks: %v", err)
-	}
-
-	for _, v := range nws {
-		if v.ID == int64(id) {
-			nw = v
-			break
-		}
-	}
-
-	var us api.Device
-
-	for _, v := range nw.Devices {
-		if v.ID == int64(ourDevid) {
-			us = v
-		}
-	}
-
-	us.PrivateKey = ourPrivkey
-
-	if nw.ID == 0 || us.ID == 0 {
-		panic("unknown network")
-	}
-
-	tmpl.ExecuteTemplate(os.Stdout, "wireguard", struct {
-		api.Network
-		Self api.Device
-	}{Network: nw, Self: us})
-}
-
 func ping(args []string) {
-	did, _ := strconv.Atoi(args[0])
-	port, _ := strconv.Atoi(args[1])
+	if len(args) < 1 {
+		die("usage: %s ping [device id] <port>", os.Args[0])
+	}
+
+	did := int(cfg.DeviceID)
+
+	if len(args) >= 2 {
+		var err error
+		did, err = strconv.Atoi(args[0])
+		if err != nil {
+			die("supply a valid numeric device id")
+		}
+		args = args[1:]
+	}
+
+	port, err := strconv.Atoi(args[0])
+	if err != nil || port > 65536 || port <= 0 {
+		die("supply a valid port number")
+	}
 
 	if err := rv.Ping(context.Background(), int64(did), port); err != nil {
 		die("couldn't ping: %v", err)
@@ -138,39 +45,57 @@ func ping(args []string) {
 }
 
 func login(args []string) {
+	if len(args) < 2 {
+		die("usage: %s login <username> <password>", os.Args[0])
+	}
+
 	if err := rv.Login(context.Background(), args[0], args[1]); err != nil {
 		die("failed to login: %v", err)
 	}
 
 	fmt.Printf("token: %v\n", rv.Token)
+
+	cfg.Token = rv.Token
+	if err := saveConfigFile(); err != nil {
+		die("failed to save config: %v", err)
+	}
 }
 
 func main() {
+	if err := readConfigFile(); err != nil {
+		die("failed to read config file: %v", err)
+	}
+
 	if len(os.Args) < 2 {
-		fmt.Println("subcommands: list {networks,devices}, login <username> <password>")
+		fmt.Printf(strings.ReplaceAll(`pikonode
+
+%s login <username> <password>
+	login to the rendezvous server
+
+%s list {networks,devices}
+	list networks or devices attached to your account
+
+%s new device <name> <pubkey>
+	create a new device
+
+%s new network <name>
+	create a new network
+
+%s join <device id> <network id>
+	add a device to a network
+
+%s leave <device id> <network id>
+	remove a device from a network
+
+%s ping [device id] <port>
+	update a/your device's endpoint
+`, "%s", os.Args[0]))
 		return
 	}
 
-	sa := os.Getenv("PIKONET")
-	if sa != "" {
-		serverAddress = sa
-	}
-
-	pk, err := os.ReadFile("pubkey")
-	if err != nil {
-		panic(err)
-	}
-	ourPkey = strings.TrimSuffix(string(pk), "\n")
-
-	privk, err := os.ReadFile("privkey")
-	if err != nil {
-		panic(err)
-	}
-	ourPrivkey = strings.TrimSuffix(string(privk), "\n")
-
 	rv = &api.API{
-		Server: serverAddress,
-		Token:  token,
+		Server: cfg.Rendezvous,
+		Token:  cfg.Token,
 		HTTP:   http.DefaultClient,
 	}
 
@@ -182,7 +107,7 @@ func main() {
 	case "genconf":
 		genconf(os.Args[2:])
 	case "new":
-		newcmd(os.Args[2:])
+		cmdNew(os.Args[2:])
 	case "join":
 		join(os.Args[2:])
 	case "leave":
