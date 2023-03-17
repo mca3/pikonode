@@ -82,11 +82,20 @@ func main() {
 		IP:   ourDevice.IP,
 	}
 
+	// Up!
+	wgChan <- wgMsg{
+		Type: wgUp,
+	}
+
 	// Wait until we receive a SIGINT
 	<-sigchan
 
 done:
 	log.Printf("Exiting.")
+
+	wgChan <- wgMsg{
+		Type: wgDown,
+	}
 
 	cancel()
 	waitGroup.Wait()

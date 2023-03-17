@@ -15,6 +15,8 @@ import (
 )
 
 var wgChan = make(chan wgMsg, 10)
+var routes []netlink.Route
+var wgIsUp bool // this variable is racy
 
 type wgMsgType int
 
@@ -22,6 +24,8 @@ const (
 	wgSetIP wgMsgType = iota
 	wgSetKey
 	wgPeer
+	wgDown
+	wgUp
 )
 
 type wgMsg struct {
@@ -121,6 +125,22 @@ func handleWgMsg(link netlink.Link, wg *wgctrl.Client, msg wgMsg) {
 		err = wg.ConfigureDevice(link.Attrs().Name, wgtypes.Config{
 			Peers: []wgtypes.PeerConfig{peer},
 		})
+	case wgUp:
+		if wgIsUp {
+			return
+		}
+
+		err = netlink.LinkSetUp(link)
+		wgIsUp = true
+		addRoutes()
+	case wgDown:
+		if !wgIsUp {
+			return
+		}
+
+		err = netlink.LinkSetDown(link)
+		rmRoutes()
+		wgIsUp = false
 	}
 
 	if err != nil {
@@ -188,13 +208,6 @@ func createWireguard(ctx context.Context) error {
 		return err
 	}
 
-	// Set up
-	if err := netlink.LinkSetUp(l); err != nil {
-		wg.Close()
-		netlink.LinkDel(l)
-		return err
-	}
-
 	waitGroup.Add(1)
 
 	go goWireguard(ctx, l, wg)
@@ -203,25 +216,49 @@ func createWireguard(ctx context.Context) error {
 }
 
 func addRoute(link netlink.Link, addr *net.IPNet) {
-	if err := netlink.RouteAdd(&netlink.Route{
+	r := netlink.Route{
 		LinkIndex: link.Attrs().Index,
 		Protocol:  6,
 		Dst:       addr,
-	}); err != nil {
-		log.Printf("failed to add route for %s: %v", addr.IP, err)
+	}
+	routes = append(routes, r)
+
+	if wgIsUp {
+		if err := netlink.RouteAdd(&r); err != nil {
+			log.Printf("failed to add route for %s: %v", addr.IP, err)
+		}
+	}
+}
+
+func addRoutes() {
+	for _, v := range routes {
+		if err := netlink.RouteAdd(&v); err != nil {
+			log.Printf("failed to add route for %s: %v", v.Dst, err)
+		}
 	}
 }
 
 func rmRoute(link netlink.Link, addr *net.IPNet) {
-	routes, err := netlink.RouteGet(addr.IP)
-	if err != nil {
-		return
-	}
+	for i, v := range routes {
+		if v.LinkIndex == link.Attrs().Index && v.Dst.IP.Equal(addr.IP) {
+			routes[i], routes[len(routes)-1] = routes[len(routes)-1], routes[i]
+			routes = routes[:len(routes)-1]
 
-	for _, v := range routes {
-		if v.LinkIndex == link.Attrs().Index {
-			netlink.RouteDel(&v)
+			if wgIsUp {
+				if err := netlink.RouteDel(&v); err != nil {
+					log.Printf("failed to delete route for %s: %v", v.Dst, err)
+				}
+			}
+
 			break
+		}
+	}
+}
+
+func rmRoutes() {
+	for _, v := range routes {
+		if err := netlink.RouteDel(&v); err != nil {
+			log.Printf("failed to delete route for %s: %v", v.Dst, err)
 		}
 	}
 }
