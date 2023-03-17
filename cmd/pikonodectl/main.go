@@ -75,8 +75,6 @@ func main() {
 		list(os.Args[2:])
 	case "login":
 		login(os.Args[2:])
-	case "genconf":
-		genconf(os.Args[2:])
 	case "new":
 		cmdNew(os.Args[2:])
 	case "join":
