@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net"
+	"net/netip"
 
 	"github.com/mca3/pikonode/internal/config"
 	"github.com/vishvananda/netlink"
@@ -25,10 +27,11 @@ const (
 )
 
 type wgMsg struct {
-	Type   wgMsgType
-	IP     string
-	Remove bool
-	Key    wgtypes.Key
+	Type     wgMsgType
+	IP       string
+	Endpoint string
+	Remove   bool
+	Key      wgtypes.Key
 }
 
 // nlWireguard implements netlink.Link, as there is no native way to do this in
@@ -45,6 +48,27 @@ func (w *nlWireguard) Type() string {
 	return "wireguard"
 }
 
+func (m *wgMsg) UDP() *net.UDPAddr {
+	if m.Endpoint == "" {
+		return nil
+	}
+
+	ap, err := netip.ParseAddrPort(m.Endpoint)
+	if err != nil {
+		return nil
+	}
+
+	return net.UDPAddrFromAddrPort(ap)
+}
+
+func (m *wgMsg) IPNet() *net.IPNet {
+	_, ipn, err := net.ParseCIDR(m.IP + "/128")
+	if err != nil {
+		return nil
+	}
+	return ipn
+}
+
 // parseKey converts a base64 key into a WireGuard key.
 func parseKey(key string) (wgtypes.Key, error) {
 	dst := [32]byte{}
@@ -54,6 +78,72 @@ func parseKey(key string) (wgtypes.Key, error) {
 	}
 
 	return wgtypes.Key(dst), nil
+}
+
+func handleWgMsg(link netlink.Link, wg *wgctrl.Client, msg wgMsg) {
+	var err error
+	switch msg.Type {
+	case wgSetIP:
+		log.Printf("setting WireGuard IP to %s", msg.IP)
+
+		var ipn *net.IPNet
+		_, ipn, err = net.ParseCIDR(msg.IP + "/128")
+		if err != nil {
+			break
+		}
+
+		// Tell the kernel where we live.
+		err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ipn})
+	case wgSetKey:
+		log.Printf("setting WireGuard key")
+
+		err = wg.ConfigureDevice(link.Attrs().Name, wgtypes.Config{
+			PrivateKey: &msg.Key,
+		})
+	case wgPeer:
+		peer := wgtypes.PeerConfig{
+			PublicKey: msg.Key,
+		}
+		ipn := msg.IPNet() // Never nil
+
+		if msg.Remove {
+			peer.Remove = true
+
+			log.Printf("Removing %s as WireGuard peer", ipn.IP.String())
+		} else {
+			ep := msg.UDP() // Could be nil
+			peer.Endpoint = ep
+			peer.AllowedIPs = []net.IPNet{*ipn}
+
+			log.Printf("Adding %s as WireGuard peer (Endpoint: %v)", ipn.IP.String(), ep)
+		}
+
+		err = wg.ConfigureDevice(link.Attrs().Name, wgtypes.Config{
+			Peers: []wgtypes.PeerConfig{peer},
+		})
+
+		// case wgUp:
+		// case wgDown:
+	}
+
+	if err != nil {
+		log.Printf("couldn't handle wireguard request %v: %v", msg.Type, err)
+	}
+}
+
+func goWireguard(ctx context.Context, link netlink.Link, wg *wgctrl.Client) {
+	defer waitGroup.Done()
+	defer netlink.LinkDel(link)
+	defer wg.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-wgChan:
+			handleWgMsg(link, wg, e)
+		}
+	}
 }
 
 func createWireguard(ctx context.Context) error {
@@ -103,19 +193,7 @@ func createWireguard(ctx context.Context) error {
 
 	waitGroup.Add(1)
 
-	go func() {
-		defer waitGroup.Done()
-		defer netlink.LinkDel(l)
-		defer wg.Close()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-wgChan:
-			}
-		}
-	}()
+	go goWireguard(ctx, l, wg)
 
 	return nil
 }

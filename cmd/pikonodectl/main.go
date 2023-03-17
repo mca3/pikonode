@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/mca3/pikonode/api"
@@ -17,32 +16,6 @@ var rv *api.API
 func die(f string, d ...any) {
 	fmt.Fprintf(os.Stderr, f+"\n", d...)
 	os.Exit(1)
-}
-
-func ping(args []string) {
-	if len(args) < 1 {
-		die("usage: %s ping [device id] <port>", os.Args[0])
-	}
-
-	did := int(config.Cfg.DeviceID)
-
-	if len(args) >= 2 {
-		var err error
-		did, err = strconv.Atoi(args[0])
-		if err != nil {
-			die("supply a valid numeric device id")
-		}
-		args = args[1:]
-	}
-
-	port, err := strconv.Atoi(args[0])
-	if err != nil || port > 65536 || port <= 0 {
-		die("supply a valid port number")
-	}
-
-	if err := rv.Ping(context.Background(), int64(did), port); err != nil {
-		die("couldn't ping: %v", err)
-	}
 }
 
 func login(args []string) {
@@ -87,9 +60,6 @@ func main() {
 
 %s leave <device id> <network id>
 	remove a device from a network
-
-%s ping [device id] <port>
-	update a/your device's endpoint
 `, "%s", os.Args[0]))
 		return
 	}
@@ -113,7 +83,5 @@ func main() {
 		join(os.Args[2:])
 	case "leave":
 		leave(os.Args[2:])
-	case "ping":
-		ping(os.Args[2:])
 	}
 }

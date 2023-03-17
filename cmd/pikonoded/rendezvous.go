@@ -15,7 +15,9 @@ import (
 
 var rv *api.API
 var connectedNetworks []api.Network
+var peerList []api.Device
 var ourDevice api.Device
+var gwChan chan api.GatewayMsg
 
 func createPikorv(ctx context.Context) error {
 	rv = &api.API{
@@ -23,6 +25,8 @@ func createPikorv(ctx context.Context) error {
 		Token:  config.Cfg.Token,
 		HTTP:   http.DefaultClient,
 	}
+
+	gwChan = make(chan api.GatewayMsg, 100)
 
 	dev, err := getDevice(ctx)
 	if err != nil {
@@ -32,7 +36,10 @@ func createPikorv(ctx context.Context) error {
 
 	ourDevice = dev
 
-	return hardRebuild(ctx)
+	go rv.Gateway(ctx, gwChan, dev.ID, config.Cfg.ListenPort)
+	go handleGateway(ctx)
+
+	return nil
 }
 
 func newDevice(ctx context.Context) (api.Device, error) {
@@ -83,8 +90,10 @@ func getDevice(ctx context.Context) (api.Device, error) {
 	return dev, nil
 }
 
-// hardRebuild repopulates connectedNetworks and ourDevice.
+// hardRebuild repopulates connectedNetworks.
 func hardRebuild(ctx context.Context) error {
+	connectedNetworks = connectedNetworks[:0]
+
 	// Get a list of our networks
 	nws, err := rv.Networks(ctx)
 	if err != nil {
@@ -112,4 +121,112 @@ func hardRebuild(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func deviceIsIn(needle api.Device, haystack []api.Device) bool {
+	for _, v := range haystack {
+		if needle.ID == v.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// updatePeers tells WireGuard about added or removed peers.
+func updatePeers() {
+	// Find old devices
+	for _, d := range peerList {
+		if d.ID == ourDevice.ID {
+			continue
+		}
+
+		ok := false
+		for _, v := range connectedNetworks {
+			if deviceIsIn(d, v.Devices) {
+				ok = true
+				break
+			}
+		}
+
+		if !ok {
+			// Must be removed
+			key, err := parseKey(d.PublicKey)
+			if err != nil {
+				// shouldn't happen.
+				continue
+			}
+
+			wgChan <- wgMsg{
+				Type:   wgPeer,
+				Remove: true,
+				Key:    key,
+			}
+		}
+	}
+
+	// Find new devices
+	for _, v := range connectedNetworks {
+		for _, d := range v.Devices {
+			if d.ID == ourDevice.ID {
+				continue
+			}
+
+			if !deviceIsIn(d, peerList) {
+				key, err := parseKey(d.PublicKey)
+				if err != nil {
+					// shouldn't happen.
+					continue
+				}
+
+				peerList = append(peerList, d)
+				wgChan <- wgMsg{
+					Type:     wgPeer,
+					IP:       d.IP,
+					Endpoint: d.Endpoint,
+					Key:      key,
+				}
+			}
+		}
+	}
+}
+
+func handleGwMsg(ctx context.Context, msg api.GatewayMsg) {
+	switch msg.Type {
+	case api.Peer:
+		key, err := parseKey(msg.Device.PublicKey)
+		if err != nil {
+			// shouldn't happen.
+			return
+		}
+
+		wgChan <- wgMsg{
+			Type:     wgPeer,
+			Remove:   msg.Remove,
+			Key:      key,
+			Endpoint: msg.Device.Endpoint,
+			IP:       msg.Device.IP,
+		}
+	case api.Connect:
+		log.Printf("Connected to rendezvous server")
+		if hardRebuild(ctx) != nil {
+			return
+		}
+
+		updatePeers()
+		log.Printf("State synchronized")
+	case api.Disconnect:
+		log.Printf("Disconnected from rendezvous server. Error: %v", msg.Error)
+		log.Printf("Reconnecting to rendezvous in %v", msg.Delay)
+	}
+}
+
+func handleGateway(ctx context.Context) {
+	for {
+		select {
+		case v := <-gwChan:
+			handleGwMsg(ctx, v)
+		case <-ctx.Done():
+			return
+		}
+	}
 }

@@ -76,6 +76,12 @@ func main() {
 		goto done
 	}
 
+	// Tell WireGuard about our IP
+	wgChan <- wgMsg{
+		Type: wgSetIP,
+		IP:   ourDevice.IP,
+	}
+
 	// Wait until we receive a SIGINT
 	<-sigchan
 

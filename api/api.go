@@ -38,8 +38,9 @@ const (
 
 	EndpointDeviceJoin  Endpoint = "/device/join"
 	EndpointDeviceLeave Endpoint = "/device/leave"
-	EndpointDevicePing  Endpoint = "/device/ping"
 	EndpointDeviceInfo  Endpoint = "/device/info"
+
+	EndpointGateway Endpoint = "/gateway"
 )
 
 var (
@@ -193,11 +194,6 @@ type njl struct {
 	Network int64
 }
 
-type devping struct {
-	Device int64
-	Port   int
-}
-
 var (
 	listDevices  = makeGetJSONResp[[]Device](EndpointListDevices)
 	listNetworks = makeGetJSONResp[[]Network](EndpointListNetworks)
@@ -207,8 +203,6 @@ var (
 	newNetwork   = makePostJSONResp[Network, Network](EndpointNewNetwork)
 	joinNetwork  = makePostJSONResp[njl, interface{}](EndpointDeviceJoin)
 	leaveNetwork = makePostJSONResp[njl, interface{}](EndpointDeviceLeave)
-
-	pingDevice = makePostJSONResp[devping, interface{}](EndpointDevicePing)
 )
 
 // Devices returns a list of devices attached to your user.
@@ -241,11 +235,5 @@ func (a *API) JoinNetwork(ctx context.Context, dev, nw int64) error {
 // LeaveNetwork removes a device from a network
 func (a *API) LeaveNetwork(ctx context.Context, dev, nw int64) error {
 	_, err := leaveNetwork(a, ctx, njl{dev, nw})
-	return err
-}
-
-// Ping pings the server with our IP and listening port.
-func (a *API) Ping(ctx context.Context, dev int64, port int) error {
-	_, err := pingDevice(a, ctx, devping{dev, port})
 	return err
 }

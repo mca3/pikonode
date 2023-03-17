@@ -84,6 +84,10 @@ func ReadConfigFile() error {
 	}
 	defer f.Close()
 
+	if err := json.NewDecoder(f).Decode(&Cfg); err != nil {
+		return err
+	}
+
 	// TODO: Sanity checks
 
 	if Cfg.ListenPort <= 0 {
@@ -91,7 +95,11 @@ func ReadConfigFile() error {
 		// TODO: Validate that it is not being used
 		rng := mathrand.NewSource(time.Now().Unix())
 		Cfg.ListenPort = int(rng.Int63())%(65535-1024) + 1024
+
+		if err := SaveConfigFile(); err != nil {
+			return err
+		}
 	}
 
-	return json.NewDecoder(f).Decode(&Cfg)
+	return nil
 }

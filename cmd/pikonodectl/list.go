@@ -15,7 +15,7 @@ func listNetworks() {
 	for i, v := range nws {
 		fmt.Printf("network id %d name \"%s\"\n", v.ID, v.Name)
 		for _, v := range v.Devices {
-			fmt.Printf("- device id %d name \"%s\"\n", v.ID, v.Name)
+			fmt.Printf("- device id %d name \"%s\" (%s)\n", v.ID, v.Name, v.Endpoint)
 		}
 
 		if i != len(nws)-1 {
@@ -31,7 +31,7 @@ func listDevices() {
 	}
 
 	for i, v := range devs {
-		fmt.Printf("device id %d name \"%s\"\n", v.ID, v.Name)
+		fmt.Printf("device id %d name \"%s\" (%s)\n", v.ID, v.Name, v.Endpoint)
 		for _, v := range v.Networks {
 			fmt.Printf("- network id %d name \"%s\"\n", v.ID, v.Name)
 		}
