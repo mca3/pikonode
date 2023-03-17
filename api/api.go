@@ -36,6 +36,8 @@ const (
 	EndpointNewDevice  Endpoint = "/new/device"
 	EndpointNewNetwork Endpoint = "/new/network"
 
+	EndpointNetworkInfo Endpoint = "/network/info"
+
 	EndpointDeviceJoin  Endpoint = "/device/join"
 	EndpointDeviceLeave Endpoint = "/device/leave"
 	EndpointDeviceInfo  Endpoint = "/device/info"
@@ -198,6 +200,7 @@ var (
 	listDevices  = makeGetJSONResp[[]Device](EndpointListDevices)
 	listNetworks = makeGetJSONResp[[]Network](EndpointListNetworks)
 	infoDevice   = makeGetJSONResp[Device](EndpointDeviceInfo)
+	infoNetwork  = makeGetJSONResp[Network](EndpointNetworkInfo)
 
 	newDevice    = makePostJSONResp[Device, Device](EndpointNewDevice)
 	newNetwork   = makePostJSONResp[Network, Network](EndpointNewNetwork)
@@ -215,6 +218,11 @@ func (a *API) Device(ctx context.Context, id int64) (Device, error) {
 
 // Network returns a list of networks attached to your user.
 func (a *API) Networks(ctx context.Context) ([]Network, error) { return listNetworks(a, ctx) }
+
+// Network returns info for one specific network.
+func (a *API) Network(ctx context.Context, id int64) (Network, error) {
+	return infoNetwork(a, ctx, "id", id)
+}
 
 // NewDevice adds a new device to the user.
 func (a *API) NewDevice(ctx context.Context, name, key string) (Device, error) {

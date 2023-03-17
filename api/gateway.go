@@ -29,7 +29,9 @@ type GatewayMsg struct {
 
 const (
 	Ping gatewayMsgType = iota
-	Peer
+	NetworkJoin
+	NetworkLeave
+	DeviceUpdate
 
 	Disconnect gatewayMsgType = -1
 	Connect    gatewayMsgType = -2

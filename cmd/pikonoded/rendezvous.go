@@ -132,9 +132,22 @@ func deviceIsIn(needle api.Device, haystack []api.Device) bool {
 	return false
 }
 
+func connsTo(dev api.Device) int {
+	c := 0
+
+	for _, v := range connectedNetworks {
+		if deviceIsIn(dev, v.Devices) {
+			c++
+		}
+	}
+
+	return c
+}
+
 // updatePeers tells WireGuard about added or removed peers.
 func updatePeers() {
 	// Find old devices
+	valid := 0
 	for _, d := range peerList {
 		if d.ID == ourDevice.ID {
 			continue
@@ -160,9 +173,15 @@ func updatePeers() {
 				Type:   wgPeer,
 				Remove: true,
 				Key:    key,
+				IP:     d.IP,
 			}
+		} else {
+			peerList[valid] = d
+			valid++
 		}
 	}
+
+	peerList = peerList[:valid]
 
 	// Find new devices
 	for _, v := range connectedNetworks {
@@ -190,22 +209,150 @@ func updatePeers() {
 	}
 }
 
+func getConnNw(id int64) (*api.Network, int) {
+	for i, v := range connectedNetworks {
+		if v.ID == id {
+			return &v, i
+		}
+	}
+	return nil, -1
+}
+
+func joinNetwork(ctx context.Context, nwid int64) {
+	nw, err := rv.Network(ctx, nwid)
+	if err != nil {
+		log.Printf("failed to fetch networks: %v", nwid, err)
+		return
+	}
+
+	connectedNetworks = append(connectedNetworks, nw)
+	updatePeers()
+
+	log.Printf("Joined network %d \"%s\"", nw.ID, nw.Name)
+}
+
+func leaveNetwork(ctx context.Context, nwid int64) {
+	nw, i := getConnNw(nwid)
+
+	if nw == nil {
+		return
+	}
+
+	connectedNetworks[i], connectedNetworks[len(connectedNetworks)-1] = connectedNetworks[len(connectedNetworks)-1], connectedNetworks[i]
+	connectedNetworks = connectedNetworks[:len(connectedNetworks)-1]
+
+	updatePeers()
+
+	log.Printf("Left network %d \"%s\"", nw.ID, nw.Name)
+}
+
+func handleJoin(ctx context.Context, dev *api.Device, nw *api.Network) {
+	if dev == nil || nw == nil {
+		log.Printf("received bad NetworkJoin from rendezvous")
+		return
+	}
+
+	if dev.ID == ourDevice.ID {
+		joinNetwork(ctx, nw.ID)
+		return
+	}
+
+	cnw, _ := getConnNw(nw.ID)
+	if cnw == nil {
+		// We shouldn't have received this.
+		log.Printf("received bad NetworkJoin from rendezvous: not part of network that device has joined")
+		return
+	}
+
+	// Add to network
+	cnw.Devices = append(cnw.Devices, *dev)
+
+	updatePeers()
+}
+
+func handleLeave(ctx context.Context, dev *api.Device, nw *api.Network) {
+	if dev == nil || nw == nil {
+		log.Printf("received bad NetworkLeave from rendezvous")
+		return
+	}
+
+	cnw, _ := getConnNw(nw.ID)
+	if cnw == nil {
+		// We shouldn't have received this.
+		log.Printf("received bad NetworkLeave from rendezvous: not part of network that device has left")
+		return
+	}
+
+	if dev.ID == ourDevice.ID {
+		leaveNetwork(ctx, nw.ID)
+		return
+	}
+
+	// Remove them from the network.
+	for i, v := range cnw.Devices {
+		if v.ID == dev.ID {
+			cnw.Devices[i], cnw.Devices[len(cnw.Devices)-1] = cnw.Devices[len(cnw.Devices)-1], cnw.Devices[i]
+			cnw.Devices = cnw.Devices[:len(cnw.Devices)-1]
+			break
+		}
+	}
+
+	updatePeers()
+}
+
+func handleUpdate(ctx context.Context, dev *api.Device) {
+	if dev == nil {
+		log.Printf("received bad DeviceUpdate from rendezvous")
+		return
+	}
+
+	if dev.ID == ourDevice.ID {
+		ourDevice = *dev
+	}
+
+	for _, v := range connectedNetworks {
+		for i, d := range v.Devices {
+			if d.ID == dev.ID {
+				v.Devices[i] = *dev
+				break
+			}
+		}
+	}
+
+	if dev.ID == ourDevice.ID {
+		// We aren't in our own peer list
+		return
+	}
+
+	for i, d := range peerList {
+		if d.ID == dev.ID {
+			peerList[i] = *dev
+			break
+		}
+	}
+
+	key, err := parseKey(dev.PublicKey)
+	if err != nil {
+		log.Printf("received bad device key from rendezvous")
+		return
+	}
+
+	wgChan <- wgMsg{
+		Type:     wgPeer,
+		Key:      key,
+		Endpoint: dev.Endpoint,
+		IP:       dev.IP,
+	}
+}
+
 func handleGwMsg(ctx context.Context, msg api.GatewayMsg) {
 	switch msg.Type {
-	case api.Peer:
-		key, err := parseKey(msg.Device.PublicKey)
-		if err != nil {
-			// shouldn't happen.
-			return
-		}
-
-		wgChan <- wgMsg{
-			Type:     wgPeer,
-			Remove:   msg.Remove,
-			Key:      key,
-			Endpoint: msg.Device.Endpoint,
-			IP:       msg.Device.IP,
-		}
+	case api.NetworkJoin:
+		handleJoin(ctx, msg.Device, msg.Network)
+	case api.NetworkLeave:
+		handleLeave(ctx, msg.Device, msg.Network)
+	case api.DeviceUpdate:
+		handleUpdate(ctx, msg.Device)
 	case api.Connect:
 		log.Printf("Connected to rendezvous server")
 		if hardRebuild(ctx) != nil {
