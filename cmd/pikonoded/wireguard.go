@@ -22,8 +22,6 @@ const (
 	wgSetIP wgMsgType = iota
 	wgSetKey
 	wgPeer
-	wgUp
-	wgDown
 )
 
 type wgMsg struct {
@@ -110,20 +108,19 @@ func handleWgMsg(link netlink.Link, wg *wgctrl.Client, msg wgMsg) {
 			peer.Remove = true
 
 			log.Printf("Removing %s as WireGuard peer", ipn.IP.String())
+			rmRoute(link, ipn)
 		} else {
 			ep := msg.UDP() // Could be nil
 			peer.Endpoint = ep
 			peer.AllowedIPs = []net.IPNet{*ipn}
 
 			log.Printf("Adding %s as WireGuard peer (Endpoint: %v)", ipn.IP.String(), ep)
+			addRoute(link, ipn)
 		}
 
 		err = wg.ConfigureDevice(link.Attrs().Name, wgtypes.Config{
 			Peers: []wgtypes.PeerConfig{peer},
 		})
-
-		// case wgUp:
-		// case wgDown:
 	}
 
 	if err != nil {
@@ -191,9 +188,40 @@ func createWireguard(ctx context.Context) error {
 		return err
 	}
 
+	// Set up
+	if err := netlink.LinkSetUp(l); err != nil {
+		wg.Close()
+		netlink.LinkDel(l)
+		return err
+	}
+
 	waitGroup.Add(1)
 
 	go goWireguard(ctx, l, wg)
 
 	return nil
+}
+
+func addRoute(link netlink.Link, addr *net.IPNet) {
+	if err := netlink.RouteAdd(&netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Protocol:  6,
+		Dst:       addr,
+	}); err != nil {
+		log.Printf("failed to add route for %s: %v", addr.IP, err)
+	}
+}
+
+func rmRoute(link netlink.Link, addr *net.IPNet) {
+	routes, err := netlink.RouteGet(addr.IP)
+	if err != nil {
+		return
+	}
+
+	for _, v := range routes {
+		if v.LinkIndex == link.Attrs().Index {
+			netlink.RouteDel(&v)
+			break
+		}
+	}
 }
