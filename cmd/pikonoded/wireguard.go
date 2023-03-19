@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"time"
 
 	"github.com/mca3/pikonode/internal/config"
 	"github.com/vishvananda/netlink"
@@ -103,8 +104,10 @@ func handleWgMsg(link netlink.Link, wg *wgctrl.Client, msg wgMsg) {
 			PrivateKey: &msg.Key,
 		})
 	case wgPeer:
+		v := 20 * time.Second
 		peer := wgtypes.PeerConfig{
-			PublicKey: msg.Key,
+			PublicKey:                   msg.Key,
+			PersistentKeepaliveInterval: &v,
 		}
 		ipn := msg.IPNet() // Never nil
 

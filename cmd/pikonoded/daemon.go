@@ -48,6 +48,16 @@ func startup(ctx context.Context) error {
 	}
 	log.Printf("UNIX socket is at %v", unixSocket)
 
+	// Fetch a port if we need to
+	if config.Cfg.ListenPort == 0 {
+		var err error
+		config.Cfg.ListenPort, rendezPort, err = fetchPort()
+		if err != nil {
+			return fmt.Errorf("failed to contact STUN server: %w", err)
+		}
+		log.Printf("External port is %d.", rendezPort)
+	}
+
 	if err := createWireguard(ctx); err != nil {
 		return fmt.Errorf("failed to create WireGuard interface: %w", err)
 	}

@@ -28,7 +28,7 @@ type API struct {
 }
 
 const (
-	EndpointLogin Endpoint = "/auth"
+	EndpointAuth Endpoint = "/auth"
 
 	EndpointListDevices  Endpoint = "/list/devices"
 	EndpointListNetworks Endpoint = "/list/networks"
@@ -151,52 +151,24 @@ func makePostJSONResp[T any, R any](ep Endpoint) func(a *API, ctx context.Contex
 	}
 }
 
-// Login logs into the Rendezvous server using username-password authentication
-// and sets the token if successful.
-func (a *API) Login(ctx context.Context, username, password string) error {
-	body, err := encodeJSON(struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Method   string `json:"method"`
-	}{username, password, "username-password"})
-	if err != nil {
-		panic(err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", a.Endpoint(EndpointLogin), body)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := a.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		return readError(res)
-	}
-
-	// TODO: Login isn't implemented properly on rv yet
-
-	token, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-
-	a.Token = string(token)
-	return nil
-}
-
 type njl struct {
 	Device  int64
 	Network int64
 }
 
+type loginData struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Method   string `json:"method"`
+}
+
+type loginResp struct {
+	Token string `json:"token"`
+}
+
 var (
+	login = makePostJSONResp[loginData, loginResp](EndpointAuth)
+
 	listDevices  = makeGetJSONResp[[]Device](EndpointListDevices)
 	listNetworks = makeGetJSONResp[[]Network](EndpointListNetworks)
 	infoDevice   = makeGetJSONResp[Device](EndpointDeviceInfo)
@@ -207,6 +179,19 @@ var (
 	joinNetwork  = makePostJSONResp[njl, interface{}](EndpointDeviceJoin)
 	leaveNetwork = makePostJSONResp[njl, interface{}](EndpointDeviceLeave)
 )
+
+// Login attempts to login to the Rendezvous server.
+//
+// Login automatically updates the token in the API struct.
+// If error is nil, assume it is updated.
+func (a *API) Login(ctx context.Context, username, password string) error {
+	resp, err := login(a, ctx, loginData{username, password, "username-password"})
+	if err != nil {
+		return err
+	}
+	a.Token = resp.Token
+	return nil
+}
 
 // Devices returns a list of devices attached to your user.
 func (a *API) Devices(ctx context.Context) ([]Device, error) { return listDevices(a, ctx) }

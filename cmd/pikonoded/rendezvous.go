@@ -18,6 +18,7 @@ var connectedNetworks []api.Network
 var peerList []api.Device
 var ourDevice api.Device
 var gwChan chan api.GatewayMsg
+var rendezPort = 0
 
 func createPikorv(ctx context.Context) error {
 	rv = &api.API{
@@ -36,7 +37,11 @@ func createPikorv(ctx context.Context) error {
 
 	ourDevice = dev
 
-	go rv.Gateway(ctx, gwChan, dev.ID, config.Cfg.ListenPort)
+	if rendezPort == 0 {
+		rendezPort = config.Cfg.ListenPort
+	}
+
+	go rv.Gateway(ctx, gwChan, dev.ID, rendezPort)
 	go handleGateway(ctx)
 
 	return nil

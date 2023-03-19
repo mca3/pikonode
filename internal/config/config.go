@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	mathrand "math/rand"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 var ConfigFileOverride = ""
@@ -89,17 +87,6 @@ func ReadConfigFile() error {
 	}
 
 	// TODO: Sanity checks
-
-	if Cfg.ListenPort <= 0 {
-		// Pick a random one in the range 1024 <= x <= 65535
-		// TODO: Validate that it is not being used
-		rng := mathrand.NewSource(time.Now().Unix())
-		Cfg.ListenPort = int(rng.Int63())%(65535-1024) + 1024
-
-		if err := SaveConfigFile(); err != nil {
-			return err
-		}
-	}
 
 	return nil
 }
