@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
+
+	"nhooyr.io/websocket"
 )
 
 type httpError int
@@ -25,6 +28,9 @@ type API struct {
 	Token string
 
 	HTTP *http.Client
+
+	ws     *websocket.Conn
+	wsLock sync.Mutex
 }
 
 const (
@@ -43,6 +49,7 @@ const (
 	EndpointDeviceInfo  Endpoint = "/device/info"
 
 	EndpointGateway Endpoint = "/gateway"
+	EndpointPunch   Endpoint = "/punch"
 )
 
 var (
@@ -166,6 +173,12 @@ type loginResp struct {
 	Token string `json:"token"`
 }
 
+type PunchDetails struct {
+	Endpoint  string `json:"endpoint"`
+	IP        string `json:"ip"`
+	PublicKey string `json:"public_key"`
+}
+
 var (
 	login = makePostJSONResp[loginData, loginResp](EndpointAuth)
 
@@ -178,6 +191,8 @@ var (
 	newNetwork   = makePostJSONResp[Network, Network](EndpointNewNetwork)
 	joinNetwork  = makePostJSONResp[njl, interface{}](EndpointDeviceJoin)
 	leaveNetwork = makePostJSONResp[njl, interface{}](EndpointDeviceLeave)
+
+	punch = makeGetJSONResp[PunchDetails](EndpointPunch)
 )
 
 // Login attempts to login to the Rendezvous server.
@@ -225,8 +240,13 @@ func (a *API) JoinNetwork(ctx context.Context, dev, nw int64) error {
 	return err
 }
 
-// LeaveNetwork removes a device from a network
+// LeaveNetwork removes a device from a network.
 func (a *API) LeaveNetwork(ctx context.Context, dev, nw int64) error {
 	_, err := leaveNetwork(a, ctx, njl{dev, nw})
 	return err
+}
+
+// PunchDetails fetches Pikopunch details from the rendezvous server.
+func (a *API) PunchDetails(ctx context.Context) (PunchDetails, error) {
+	return punch(a, ctx)
 }

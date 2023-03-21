@@ -19,9 +19,9 @@ type GatewayMsg struct {
 	Network *Network `json:"network,omitempty"`
 	Remove  bool
 
-	Port      int   `json:"port,omitempty"`
-	DeviceID  int64 `json:"device_id,omitempty"`
-	NetworkID int64 `json:"network_id,omitempty"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	DeviceID  int64  `json:"device_id,omitempty"`
+	NetworkID int64  `json:"network_id,omitempty"`
 
 	Delay time.Duration `json:"-"`
 	Error error         `json:"-"`
@@ -69,7 +69,6 @@ func (a *API) gwConnected(ctx context.Context, conn *websocket.Conn, dev int64, 
 	_ = wsjson.Write(ctx, conn, GatewayMsg{
 		Type:     Ping,
 		DeviceID: dev,
-		Port:     port,
 	})
 }
 
@@ -82,6 +81,8 @@ func (a *API) Gateway(ctx context.Context, c chan<- GatewayMsg, dev int64, port 
 			<-t.C
 		}
 	}()
+
+	a.wsLock.Lock()
 
 	for {
 		conn, err := a.dialGateway(ctx)
@@ -100,8 +101,13 @@ func (a *API) Gateway(ctx context.Context, c chan<- GatewayMsg, dev int64, port 
 		d = time.Second
 
 		c <- GatewayMsg{Type: Connect}
+		a.ws = conn
+		a.wsLock.Unlock()
+
 		a.gwConnected(ctx, conn, dev, port)
 		err = a.gwReadLoop(ctx, conn, c)
+
+		a.wsLock.Lock()
 		c <- GatewayMsg{Type: Disconnect, Delay: d, Error: err}
 		t.Reset(d)
 
@@ -117,4 +123,11 @@ func (a *API) Gateway(ctx context.Context, c chan<- GatewayMsg, dev int64, port 
 			continue
 		}
 	}
+}
+
+func (a *API) GatewaySend(ctx context.Context, msg GatewayMsg) error {
+	a.wsLock.Lock()
+	defer a.wsLock.Unlock()
+
+	return wsjson.Write(ctx, a.ws, msg)
 }

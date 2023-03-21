@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/mca3/pikonode/api"
 	"github.com/mca3/pikonode/internal/config"
 )
 
@@ -35,6 +38,19 @@ func getRuntimeDir() string {
 	return runtimeDir
 }
 
+func updateAddr(ctx context.Context, pd api.PunchDetails) error {
+	addr, err := fetchEndpoint(ctx, fmt.Sprintf("[%s]:8743", pd.IP))
+	if err != nil {
+		return err
+	}
+
+	return rv.GatewaySend(ctx, api.GatewayMsg{
+		Type:     api.Ping,
+		DeviceID: ourDevice.ID,
+		Endpoint: addr,
+	})
+}
+
 func startup(ctx context.Context) error {
 	if err := config.ReadConfigFile(); err != nil {
 		return fmt.Errorf("failed to load config file: %w", err)
@@ -50,12 +66,7 @@ func startup(ctx context.Context) error {
 
 	// Fetch a port if we need to
 	if config.Cfg.ListenPort == 0 {
-		var err error
-		config.Cfg.ListenPort, rendezPort, err = fetchPort()
-		if err != nil {
-			return fmt.Errorf("failed to contact STUN server: %w", err)
-		}
-		log.Printf("External port is %d.", rendezPort)
+		config.Cfg.ListenPort = int((rand.Uint32() & (1 << 16)) | (1 << 10))
 	}
 
 	if err := createWireguard(ctx); err != nil {
@@ -66,6 +77,49 @@ func startup(ctx context.Context) error {
 	if err := createPikorv(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)
 	}
+
+	pd, err := rv.PunchDetails(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to request pikopunch details: %w", err)
+	}
+
+	pdkey, err := parseKey(pd.PublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to parse pikopunch key: %w", err)
+	}
+
+	wgChan <- wgMsg{
+		Type:     wgPeer,
+		IP:       pd.IP,
+		Endpoint: pd.Endpoint,
+		Key:      pdkey,
+	}
+
+	go func() {
+		select {
+		// Wait for WireGuard to settle
+		case <-time.After(time.Second * 2):
+		case <-ctx.Done():
+			return
+		}
+
+		if err := updateAddr(ctx, pd); err != nil {
+			log.Printf("failed to fetch endpoint: %v", err)
+		}
+
+		tick := time.NewTicker(time.Second * 20)
+
+		for {
+			select {
+			case <-ctx.Done():
+				tick.Stop()
+			case <-tick.C:
+				if err := updateAddr(ctx, pd); err != nil {
+					log.Printf("failed to fetch endpoint: %v", err)
+				}
+			}
+		}
+	}()
 
 	return nil
 }
