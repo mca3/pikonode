@@ -92,7 +92,7 @@ func getDevice(ctx context.Context) (api.Device, error) {
 		return newDevice(ctx)
 	}
 
-	return dev, nil
+	return dev, err
 }
 
 // hardRebuild repopulates connectedNetworks.
