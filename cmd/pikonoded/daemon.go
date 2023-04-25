@@ -66,7 +66,7 @@ func startup(ctx context.Context) error {
 
 	// Fetch a port if we need to
 	if config.Cfg.ListenPort == 0 {
-		config.Cfg.ListenPort = int((rand.Uint32() & (1 << 16)) | (1 << 10))
+		config.Cfg.ListenPort = int(rand.Uint32() | (1<<10)) & 0xFFFF
 	}
 
 	if err := createWireguard(ctx); err != nil {
