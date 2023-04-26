@@ -137,18 +137,6 @@ func deviceIsIn(needle api.Device, haystack []api.Device) bool {
 	return false
 }
 
-func connsTo(dev api.Device) int {
-	c := 0
-
-	for _, v := range connectedNetworks {
-		if deviceIsIn(dev, v.Devices) {
-			c++
-		}
-	}
-
-	return c
-}
-
 // updatePeers tells WireGuard about added or removed peers.
 func updatePeers() {
 	// Find old devices

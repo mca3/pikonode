@@ -52,13 +52,17 @@ func New(name string) (Interface, error) {
 // Set sets the state of the interface to be up or down.
 func (li *linuxInterface) Set(state bool) error {
 	if state {
+		if err := netlink.LinkSetUp(li.link); err != nil {
+			return err
+		}
+
 		// Add all routes back. Quietly fail.
 		// TODO: No-op if already up.
 		for _, v := range li.routes {
 			netlink.RouteAdd(&v)
 		}
 
-		return netlink.LinkSetUp(li.link)
+		return nil
 	}
 
 	return netlink.LinkSetDown(li.link)

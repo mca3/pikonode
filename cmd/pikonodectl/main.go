@@ -41,7 +41,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Printf(strings.ReplaceAll(`pikonode
+		fmt.Print(strings.ReplaceAll(`pikonode
 
 %s login <username> <password>
 	login to the rendezvous server

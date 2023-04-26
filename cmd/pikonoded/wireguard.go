@@ -149,6 +149,9 @@ func goWireguard(ctx context.Context, ifc ifctl.Interface, wg *wgctrl.Client) {
 func createWireguard(ctx context.Context) error {
 	// Create the interface
 	l, err := ifctl.New(config.Cfg.InterfaceName)
+	if err != nil {
+		return err
+	}
 
 	// Unfortunately since this spawns a goroutine to handle messages being
 	// passed to it since I'm not entirely sure if wgctrl-go will like

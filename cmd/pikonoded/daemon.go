@@ -66,13 +66,15 @@ func startup(ctx context.Context) error {
 
 	// Fetch a port if we need to
 	if config.Cfg.ListenPort == 0 {
-		config.Cfg.ListenPort = int(rand.Uint32() | (1<<10)) & 0xFFFF
+		config.Cfg.ListenPort = int(rand.Uint32()|(1<<10)) & 0xFFFF
 	}
 
 	if err := createWireguard(ctx); err != nil {
 		return fmt.Errorf("failed to create WireGuard interface: %w", err)
 	}
 	log.Printf("WireGuard interface is %v. Listen port is %d.", config.Cfg.InterfaceName, config.Cfg.ListenPort)
+
+	go listenBroadcast(ctx)
 
 	if err := createPikorv(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)
