@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"time"
 
 	"github.com/mca3/pikonode/cmd/pikonoded/ifctl"
 	"github.com/mca3/pikonode/internal/config"
@@ -26,6 +27,8 @@ const (
 	wgDown
 	wgUp
 )
+
+var wgKeepalive = time.Second * 20
 
 type wgMsg struct {
 	Type     wgMsgType
@@ -89,7 +92,8 @@ func handleWgMsg(ifc ifctl.Interface, wg *wgctrl.Client, msg wgMsg) {
 		})
 	case wgPeer:
 		peer := wgtypes.PeerConfig{
-			PublicKey: msg.Key,
+			PublicKey:                   msg.Key,
+			PersistentKeepaliveInterval: &wgKeepalive,
 		}
 
 		// Usually never nil, unless coming from Discovery, in which case we know the IP anyway.
