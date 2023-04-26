@@ -97,6 +97,9 @@ func startup(ctx context.Context) error {
 		Key:      pdkey,
 	}
 
+	// Introduce ourselves now that we're all set up
+	sendDiscovHello(false)
+
 	go func() {
 		select {
 		// Wait for WireGuard to settle

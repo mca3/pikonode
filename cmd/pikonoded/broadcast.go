@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -71,6 +72,8 @@ const (
 //
 // Used for asking the local network about devices on the network.
 var udpBrd *net.UDPConn
+
+var discovHelloTicker = time.NewTicker(time.Minute)
 
 // listenBroadcast listens for discovery packets on the local interface.
 func listenBroadcast(ctx context.Context) error {
@@ -139,6 +142,9 @@ func discovWait() error {
 //
 // If reply is true, a Hello Reply message will be sent.
 func sendDiscovHello(reply bool) {
+	// Don't send another automatic Hello for at least another minute
+	discovHelloTicker.Reset(time.Minute)
+
 	// Layout: "PIKO" HELLO (port) (public key)
 	buf := make([]byte, 51)
 
@@ -156,16 +162,20 @@ func sendDiscovHello(reply bool) {
 	binary.BigEndian.PutUint16(buf[5:7], uint16(config.Cfg.ListenPort))
 	copy(buf[7:], config.Cfg.PublicKey)
 
-	udpBrd.WriteTo(buf, &net.UDPAddr{IP: net.IPv4bcast, Port: discovPort})
+	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4bcast, Port: discovPort})
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	conn.Write(buf)
 }
 
 // discovHello automatically sends out a Hello message every minute.
 func discovHello(ctx context.Context) {
-	sendDiscovHello(false)
-
 	for {
 		select {
-		case <-time.After(time.Minute):
+		case <-discovHelloTicker.C:
 			sendDiscovHello(false)
 		case <-ctx.Done():
 			return
@@ -192,5 +202,34 @@ func onDiscovHello(addr net.Addr, msg []byte, reply bool) {
 		// Reply; this is to prevent flooding the network.
 		// In this case, it isn't.
 		sendDiscovHello(true)
+	}
+
+	// Determine if we want to connect to them
+	// TODO: Determine if an existing connection is good and ignore this?
+	// TODO: This is racy.
+	ok := false
+	for _, v := range peerList {
+		if v.PublicKey == key {
+			ok = true
+			break
+		}
+	}
+
+	if !ok {
+		return
+	}
+
+	// We want to connect to them.
+	// Bypassing whatever Rendezvous thinks.
+	pkey, err := parseKey(key)
+	if err != nil {
+		log.Printf("HELLO from %s sent invalid public key!", addr)
+		return
+	}
+
+	wgChan <- wgMsg{
+		Type:     wgPeer,
+		Endpoint: fmt.Sprintf("%s:%d", addr.(*net.UDPAddr).IP.String(), port),
+		Key:      pkey,
 	}
 }

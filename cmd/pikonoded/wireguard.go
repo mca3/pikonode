@@ -91,7 +91,9 @@ func handleWgMsg(ifc ifctl.Interface, wg *wgctrl.Client, msg wgMsg) {
 		peer := wgtypes.PeerConfig{
 			PublicKey: msg.Key,
 		}
-		ipn := msg.IPNet() // Never nil
+
+		// Usually never nil, unless coming from Discovery, in which case we know the IP anyway.
+		ipn := msg.IPNet()
 
 		if msg.Remove {
 			peer.Remove = true
@@ -101,10 +103,15 @@ func handleWgMsg(ifc ifctl.Interface, wg *wgctrl.Client, msg wgMsg) {
 		} else {
 			ep := msg.UDP() // Could be nil
 			peer.Endpoint = ep
-			peer.AllowedIPs = []net.IPNet{*ipn}
-
-			log.Printf("Adding %s as WireGuard peer (Endpoint: %v)", ipn.IP.String(), ep)
-			ifc.AddRoute(ipn)
+			if ipn != nil {
+				// From Discovery, this will be nil.
+				peer.AllowedIPs = []net.IPNet{*ipn}
+				log.Printf("Adding %s as WireGuard peer (Endpoint: %v)", ipn.IP.String(), ep)
+				ifc.AddRoute(ipn)
+			} else {
+				// Just for discovery. TODO
+				log.Printf("Adding (unknown) as WireGuard peer (Endpoint: %v)", ep)
+			}
 		}
 
 		err = wg.ConfigureDevice(config.Cfg.InterfaceName, wgtypes.Config{
