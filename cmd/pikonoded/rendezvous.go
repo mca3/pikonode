@@ -168,6 +168,7 @@ func updatePeers() {
 				continue
 			}
 
+			log.Printf("removing peer %s", d.IP)
 			wgDev.RemovePeer(key)
 		} else {
 			peerList[valid] = d
@@ -192,6 +193,7 @@ func updatePeers() {
 				}
 
 				peerList = append(peerList, d)
+				log.Printf("adding peer %s", d.IP)
 				wgDev.AddPeer(mustParseIPNet(d.IP), mustParseUDPAddr(d.Endpoint), key)
 			}
 		}

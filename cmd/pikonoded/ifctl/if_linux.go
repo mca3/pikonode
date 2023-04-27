@@ -49,6 +49,19 @@ func New(name string) (Interface, error) {
 	return &li, nil
 }
 
+// From returns an Interface by its name.
+func From(name string) (Interface, error) {
+	li := linuxInterface{}
+
+	l, err := netlink.LinkByName(name)
+	if err != nil {
+		return nil, err
+	}
+
+	li.link = l
+	return &li, nil
+}
+
 // Set sets the state of the interface to be up or down.
 func (li *linuxInterface) Set(state bool) error {
 	if state {
