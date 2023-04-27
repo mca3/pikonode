@@ -5,3 +5,7 @@
 
 This repository contains `pikonodectl`, a tool for managing Pikonet networks,
 and `pikonoded`, a tool for connecting to them.
+
+**Note**: Only Linux hosts with an in-kernel implementation are supported at
+this time.
+There is no documentation on how to set this up, you're on your own.

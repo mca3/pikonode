@@ -27,7 +27,6 @@ var Cfg = struct {
 	InterfaceName: "pn0",
 	ListenPort:    0,
 
-	// TODO: Generate these
 	PrivateKey: "",
 	PublicKey:  "",
 }
@@ -49,8 +48,6 @@ func resolveConfigFile() string {
 }
 
 func SaveConfigFile() error {
-	// TODO: Generate keys if needed
-
 	path := resolveConfigFile()
 
 	base := filepath.Dir(path)

@@ -29,11 +29,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"net"
 	"time"
 
+	"github.com/mca3/pikonode/cmd/pikonoded/wg"
 	"github.com/mca3/pikonode/internal/config"
 )
 
@@ -77,9 +77,6 @@ var discovHelloTicker = time.NewTicker(time.Minute)
 
 // listenBroadcast listens for discovery packets on the local interface.
 func listenBroadcast(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{
 		IP:   net.IPv4bcast,
 		Port: discovPort,
@@ -87,7 +84,6 @@ func listenBroadcast(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 
 	udpBrd = conn
 
@@ -100,7 +96,11 @@ func listenBroadcast(ctx context.Context) error {
 		conn.Close()
 	}()
 
-	return discovWait()
+	go func() {
+		log.Fatal(discovWait())
+	}()
+
+	return nil
 }
 
 // discovWait reads discovery messages from the broadcast IP.
@@ -221,15 +221,16 @@ func onDiscovHello(addr net.Addr, msg []byte, reply bool) {
 
 	// We want to connect to them.
 	// Bypassing whatever Rendezvous thinks.
-	pkey, err := parseKey(key)
+	pkey, err := wg.ParseKey(key)
 	if err != nil {
 		log.Printf("HELLO from %s sent invalid public key!", addr)
 		return
 	}
 
-	wgChan <- wgMsg{
-		Type:     wgPeer,
-		Endpoint: fmt.Sprintf("%s:%d", addr.(*net.UDPAddr).IP.String(), port),
-		Key:      pkey,
-	}
+	ep := addr.(*net.UDPAddr)
+	ep.Port = int(port)
+
+	wgLock.Lock()
+	wgDev.AddPeer(nil, ep, pkey)
+	wgLock.Unlock()
 }

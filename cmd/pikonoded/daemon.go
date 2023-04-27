@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mca3/pikonode/api"
+	"github.com/mca3/pikonode/cmd/pikonoded/wg"
 	"github.com/mca3/pikonode/internal/config"
 )
 
@@ -20,6 +23,9 @@ import (
 // not run.
 // This is likely not an ideal solution.
 var waitGroup = sync.WaitGroup{}
+
+var wgDev wg.Device
+var wgLock sync.Mutex
 
 // getRuntimeDir gets the runtime directory of the current user, or uses the
 // current working directory as a fallback.
@@ -51,54 +57,68 @@ func updateAddr(ctx context.Context, pd api.PunchDetails) error {
 	})
 }
 
-func startup(ctx context.Context) error {
-	if err := config.ReadConfigFile(); err != nil {
-		return fmt.Errorf("failed to load config file: %w", err)
+func mustParseIPNet(ip string) *net.IPNet {
+	_, ipn, err := net.ParseCIDR(ip + "/128")
+	if err != nil {
+		panic(err)
+	}
+	return ipn
+}
+
+func mustParseUDPAddr(ip string) *net.UDPAddr {
+	ap := netip.MustParseAddrPort(ip)
+	return net.UDPAddrFromAddrPort(ap)
+}
+
+func startWireguard() error {
+	wgLock.Lock()
+	defer wgLock.Unlock()
+
+	key, err := wg.ParseKey(config.Cfg.PrivateKey)
+	if err != nil {
+		return err
 	}
 
-	dir := getRuntimeDir()
-	unixSocket = filepath.Join(dir, fmt.Sprintf("pikonet.%d", os.Getpid()))
-
-	if err := bindUnix(ctx); err != nil {
-		return fmt.Errorf("failed to create UNIX socket: %w", err)
-	}
-	log.Printf("UNIX socket is at %v", unixSocket)
-
-	// Fetch a port if we need to
-	if config.Cfg.ListenPort == 0 {
-		config.Cfg.ListenPort = int(rand.Uint32()|(1<<10)) & 0xFFFF
+	wgDev, err = wg.New(config.Cfg.InterfaceName)
+	if err != nil {
+		return err
 	}
 
-	if err := createWireguard(ctx); err != nil {
-		return fmt.Errorf("failed to create WireGuard interface: %w", err)
+	if err := wgDev.SetKey(key); err != nil {
+		wgDev.Close()
+		return err
 	}
-	log.Printf("WireGuard interface is %v. Listen port is %d.", config.Cfg.InterfaceName, config.Cfg.ListenPort)
 
-	go listenBroadcast(ctx)
-
-	if err := createPikorv(ctx); err != nil {
-		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)
+	if err := wgDev.SetListenPort(uint16(config.Cfg.ListenPort)); err != nil {
+		wgDev.Close()
+		return err
 	}
+
+	if err := wgDev.SetIP(mustParseIPNet(ourDevice.IP)); err != nil {
+		wgDev.Close()
+		return err
+	}
+
+	return nil
+}
+
+func startPikopunch(ctx context.Context) error {
+	wgLock.Lock()
+	defer wgLock.Unlock()
 
 	pd, err := rv.PunchDetails(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to request pikopunch details: %w", err)
 	}
 
-	pdkey, err := parseKey(pd.PublicKey)
+	pdkey, err := wg.ParseKey(pd.PublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to parse pikopunch key: %w", err)
 	}
 
-	wgChan <- wgMsg{
-		Type:     wgPeer,
-		IP:       pd.IP,
-		Endpoint: pd.Endpoint,
-		Key:      pdkey,
+	if err := wgDev.AddPeer(mustParseIPNet(pd.IP), mustParseUDPAddr(pd.Endpoint), pdkey); err != nil {
+		return fmt.Errorf("failed to add pikopunch peer: %w", err)
 	}
-
-	// Introduce ourselves now that we're all set up
-	sendDiscovHello(false)
 
 	go func() {
 		select {
@@ -118,6 +138,7 @@ func startup(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				tick.Stop()
+				return
 			case <-tick.C:
 				if err := updateAddr(ctx, pd); err != nil {
 					log.Printf("failed to fetch endpoint: %v", err)
@@ -125,6 +146,49 @@ func startup(ctx context.Context) error {
 			}
 		}
 	}()
+
+	return nil
+}
+
+func startup(ctx context.Context) error {
+	if err := config.ReadConfigFile(); err != nil {
+		return fmt.Errorf("failed to load config file: %w", err)
+	}
+
+	dir := getRuntimeDir()
+	unixSocket = filepath.Join(dir, fmt.Sprintf("pikonet.%d", os.Getpid()))
+
+	if err := bindUnix(ctx); err != nil {
+		return fmt.Errorf("failed to create UNIX socket: %w", err)
+	}
+	log.Printf("UNIX socket is at %v", unixSocket)
+
+	// Fetch a port if we need to
+	if config.Cfg.ListenPort == 0 {
+		config.Cfg.ListenPort = int(rand.Uint32()|(1<<10)) & 0xFFFF
+	}
+
+	if err := createPikorv(ctx); err != nil {
+		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)
+	}
+
+	if err := startWireguard(); err != nil {
+		return fmt.Errorf("failed to start wireguard: %w", err)
+	}
+
+	log.Printf("WireGuard interface is %v. Listen port is %d.", config.Cfg.InterfaceName, config.Cfg.ListenPort)
+
+	wgLock.Lock()
+	wgDev.SetState(true)
+	wgLock.Unlock()
+
+	if err := startPikopunch(ctx); err != nil {
+		return err
+	}
+
+	// Introduce ourselves now that we're all set up
+	listenBroadcast(ctx)
+	sendDiscovHello(false)
 
 	return nil
 }
@@ -145,27 +209,18 @@ func main() {
 		goto done
 	}
 
-	// Tell WireGuard about our IP
-	wgChan <- wgMsg{
-		Type: wgSetIP,
-		IP:   ourDevice.IP,
-	}
-
-	// Up!
-	wgChan <- wgMsg{
-		Type: wgUp,
-	}
-
 	// Wait until we receive a SIGINT
 	<-sigchan
 
 done:
 	log.Printf("Exiting.")
 
-	wgChan <- wgMsg{
-		Type: wgDown,
+	if wgDev != nil {
+		wgLock.Lock()
+		wgDev.SetState(false)
+		wgDev.Close()
+		wgLock.Unlock()
 	}
 
 	cancel()
-	waitGroup.Wait()
 }

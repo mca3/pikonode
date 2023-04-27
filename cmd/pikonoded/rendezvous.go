@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/mca3/pikonode/api"
+	"github.com/mca3/pikonode/cmd/pikonoded/wg"
 	"github.com/mca3/pikonode/internal/config"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -62,10 +63,12 @@ func newDevice(ctx context.Context) (api.Device, error) {
 	config.Cfg.PublicKey = pubKey.String()
 	config.Cfg.PrivateKey = privKey.String()
 
-	wgChan <- wgMsg{
-		Type: wgSetKey,
-		Key:  privKey,
-	}
+	/*
+		wgChan <- wgMsg{
+			Type: wgSetKey,
+			Key:  privKey,
+		}
+	*/
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -139,6 +142,9 @@ func deviceIsIn(needle api.Device, haystack []api.Device) bool {
 
 // updatePeers tells WireGuard about added or removed peers.
 func updatePeers() {
+	wgLock.Lock()
+	defer wgLock.Unlock()
+
 	// Find old devices
 	valid := 0
 	for _, d := range peerList {
@@ -156,18 +162,13 @@ func updatePeers() {
 
 		if !ok {
 			// Must be removed
-			key, err := parseKey(d.PublicKey)
+			key, err := wg.ParseKey(d.PublicKey)
 			if err != nil {
 				// shouldn't happen.
 				continue
 			}
 
-			wgChan <- wgMsg{
-				Type:   wgPeer,
-				Remove: true,
-				Key:    key,
-				IP:     d.IP,
-			}
+			wgDev.RemovePeer(key)
 		} else {
 			peerList[valid] = d
 			valid++
@@ -184,19 +185,14 @@ func updatePeers() {
 			}
 
 			if !deviceIsIn(d, peerList) {
-				key, err := parseKey(d.PublicKey)
+				key, err := wg.ParseKey(d.PublicKey)
 				if err != nil {
 					// shouldn't happen.
 					continue
 				}
 
 				peerList = append(peerList, d)
-				wgChan <- wgMsg{
-					Type:     wgPeer,
-					IP:       d.IP,
-					Endpoint: d.Endpoint,
-					Key:      key,
-				}
+				wgDev.AddPeer(mustParseIPNet(d.IP), mustParseUDPAddr(d.Endpoint), key)
 			}
 		}
 	}
@@ -294,6 +290,9 @@ func handleLeave(ctx context.Context, dev *api.Device, nw *api.Network) {
 }
 
 func handleUpdate(ctx context.Context, dev *api.Device) {
+	wgLock.Lock()
+	defer wgLock.Unlock()
+
 	if dev == nil {
 		log.Printf("received bad DeviceUpdate from rendezvous")
 		return
@@ -324,18 +323,13 @@ func handleUpdate(ctx context.Context, dev *api.Device) {
 		}
 	}
 
-	key, err := parseKey(dev.PublicKey)
+	key, err := wg.ParseKey(dev.PublicKey)
 	if err != nil {
 		log.Printf("received bad device key from rendezvous")
 		return
 	}
 
-	wgChan <- wgMsg{
-		Type:     wgPeer,
-		Key:      key,
-		Endpoint: dev.Endpoint,
-		IP:       dev.IP,
-	}
+	wgDev.AddPeer(mustParseIPNet(dev.IP), mustParseUDPAddr(dev.Endpoint), key)
 }
 
 func handleGwMsg(ctx context.Context, msg api.GatewayMsg) {
