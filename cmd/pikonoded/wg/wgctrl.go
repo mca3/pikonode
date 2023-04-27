@@ -1,16 +1,16 @@
 package wg
 
 import (
-	"net"
-	"log"
 	"fmt"
+	"log"
+	"net"
 
 	"github.com/mca3/pikonode/cmd/pikonoded/ifctl"
-	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // wgctrlWireguard implements an interface to the in-kernel implementation of
@@ -59,13 +59,19 @@ func newTUNWireguard(name string) (Device, error) {
 		return nil, err
 	}
 
+	// Grab the interface
+	realName, err := t.Name()
+	if err == nil {
+		name = realName
+	}
+
 	il, err := uapiOpen(name)
 	if err != nil {
 		t.Close()
 		return nil, err
 	}
 
-	logger := device.NewLogger(device.LogLevelError, fmt.Sprintf("(%s) ", name))
+	logger := device.NewLogger(device.LogLevelVerbose, fmt.Sprintf("(%s) ", name))
 
 	dev := device.NewDevice(t, conn.NewDefaultBind(), logger)
 
@@ -74,14 +80,14 @@ func newTUNWireguard(name string) (Device, error) {
 		dev.Close()
 		il.Close()
 		t.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to listen on uapi socket: %w", err)
 	}
 
 	go func() {
 		defer t.Close()
 		defer il.Close()
 		defer dev.Close()
-		defer uapi.Close()	
+		defer uapi.Close()
 
 		for {
 			conn, err := uapi.Accept()
@@ -92,18 +98,13 @@ func newTUNWireguard(name string) (Device, error) {
 		}
 	}()
 
-	// Grab the interface
-	realName, err := t.Name()
-	if err != nil {
-		realName = name
-	}
-
-	ifc, err := ifctl.From(realName)
+	ifc, err := ifctl.From(name)
 	if err != nil {
 		uapi.Close()
 		dev.Close()
 		il.Close()
 		t.Close()
+		return nil, err
 	}
 
 	// Configure WireGuard

@@ -63,6 +63,6 @@ func ParseKey(key string) (wgtypes.Key, error) {
 
 // New creates a new WireGuard device.
 func New(name string) (Device, error) {
-	return newTUNWireguard(name)
-	// return newNativeWireguard(name)
+	// return newTUNWireguard(name)
+	return newNativeWireguard(name)
 }

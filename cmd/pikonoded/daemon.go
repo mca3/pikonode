@@ -66,6 +66,10 @@ func mustParseIPNet(ip string) *net.IPNet {
 }
 
 func mustParseUDPAddr(ip string) *net.UDPAddr {
+	if ip == "" {
+		return nil
+	}
+
 	ap := netip.MustParseAddrPort(ip)
 	return net.UDPAddrFromAddrPort(ap)
 }

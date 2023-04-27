@@ -97,7 +97,7 @@ func listenBroadcast(ctx context.Context) error {
 	}()
 
 	go func() {
-		log.Fatal(discovWait())
+		log.Print(discovWait())
 	}()
 
 	return nil
