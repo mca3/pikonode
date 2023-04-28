@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"time"
 )
 
@@ -28,11 +29,23 @@ func fetchEndpoint(ctx context.Context, ppaddr string) (string, error) {
 
 	buf := make([]byte, 64)
 
+	send := func() {
+		if runtime.GOOS == "windows" {
+			// Empty writes don't work on Windows
+			cli.Write([]byte{0})
+		} else {
+			cli.Write([]byte(nil))
+		}
+	}
+
+	send()
+
 	go func() {
 		for {
 			select {
 			case <-time.After(time.Second * 5):
-				cli.Write([]byte(nil))
+				// Retry every 5 seconds
+				send()
 			case <-ctx.Done():
 				cli.Close()
 				return

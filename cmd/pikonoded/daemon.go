@@ -47,7 +47,7 @@ func getRuntimeDir() string {
 func updateAddr(ctx context.Context, pd api.PunchDetails) error {
 	addr, err := fetchEndpoint(ctx, fmt.Sprintf("[%s]:8743", pd.IP))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to contact pikopunch: %v", err)
 	}
 
 	return rv.GatewaySend(ctx, api.GatewayMsg{
