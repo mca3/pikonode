@@ -17,7 +17,7 @@ type Network struct {
 	Devices []Device `json:"devices"`
 }
 
-// Device represnets a device, its unique Pikonet IP, and its public key.
+// Device represents a device, its unique Pikonet IP, and its public key.
 type Device struct {
 	ID    int64  `json:"id"`
 	Owner int64  `json:"owner"`

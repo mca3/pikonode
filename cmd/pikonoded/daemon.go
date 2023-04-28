@@ -191,8 +191,7 @@ func startup(ctx context.Context) error {
 	}
 
 	// Introduce ourselves now that we're all set up
-	listenBroadcast(ctx)
-	sendDiscovHello(false)
+	go listenBroadcast(ctx)
 
 	return nil
 }
