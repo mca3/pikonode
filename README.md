@@ -6,8 +6,8 @@
 This repository contains `pikonodectl`, a tool for managing Pikonet networks,
 and `pikonoded`, a tool for connecting to them.
 
-**Note**: Only Linux hosts with an in-kernel implementation are supported at
-this time.
+**Note**: Only Windows and Linux hosts are supported currently. It is assumed
+you want the in-kernel implementation.
 There is no documentation on how to set this up, you're on your own.
 
 ## Windows compatibility
@@ -18,7 +18,5 @@ I have not tried on Windows 10, yet.
 
 Additionally:
 
-- Broadcast discovery does not work, but it will whenever I switch over to using
-  multicast discovery
 - The network adapter is recreated on every execution
-- Likely more I have not figured out yet
+- Probably much, much more. That's just all I know.
