@@ -24,7 +24,9 @@ package discov
 import (
 	"bytes"
 	"context"
+	"log"
 	"net"
+	"runtime"
 	"sync"
 
 	"golang.org/x/net/ipv4"
@@ -42,13 +44,23 @@ const (
 
 var (
 	// Multicast IP for Discovery communication.
-	IP = net.IPv4(239, 112, 110, 100)
+	//
+	// Previously this was 239.112.110.100, but due to Windows being
+	// Windows, it was changed to piggyback off of the SSDP address.
+	//
+	// To anyne who's reading this: please let me know if you have a fix
+	// that I can do easily and programmatically that would let me
+	// uncomment this line:
+	//   IP = net.IPv4(239, 112, 110, 100)
+	IP = net.IPv4(239, 255, 255, 250)
 
 	// IP and Port combined into a UDPAddr.
 	Address = &net.UDPAddr{
 		IP:   IP,
 		Port: Port,
 	}
+
+	isWindows = runtime.GOOS == "windows"
 )
 
 // Discovery holds state for local peer discovery.
@@ -90,6 +102,9 @@ func (d *Discovery) Listen(ctx context.Context) error {
 	d.ifs = ifs
 	d.pc = pc
 	d.mu.Unlock()
+
+	pc.SetMulticastLoopback(true)
+	pc.SetMulticastTTL(2)
 
 	// Join the multicast group on all interfaces.
 	for _, v := range ifs {
@@ -136,9 +151,17 @@ func (d *Discovery) Send(msg []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	for _, v := range d.ifs {
-		if err := d.pc.SetMulticastInterface(&v); err == nil {
-			d.pc.WriteTo(msg, nil, Address)
+	for i := range d.ifs {
+		var cm ipv4.ControlMessage
+		if isWindows {
+			if err := d.pc.SetMulticastInterface(&d.ifs[i]); err != nil {
+				log.Printf("net/discov: failed to set multicast interface: %v", err)
+			}
+		} else {
+			cm.IfIndex = d.ifs[i].Index
+		}
+		if _, err := d.pc.WriteTo(msg, &cm, Address); err != nil {
+			log.Printf("net/discov: WriteTo failed: %v", err)
 		}
 	}
 }
