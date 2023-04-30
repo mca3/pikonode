@@ -11,7 +11,7 @@ import (
 )
 
 // serializeLabels writes labels to the writer.
-func serializeLabels(w io.Writer, labels [][]byte) (int, error) {
+func serializeLabels(w io.Writer, labels []string) (int, error) {
 	// For storing label size
 	var tmp [1]byte
 	n := 0
@@ -24,7 +24,7 @@ func serializeLabels(w io.Writer, labels [][]byte) (int, error) {
 			return n, err
 		}
 
-		s, err = w.Write(v)
+		s, err = w.Write([]byte(v))
 		n += s
 		if err != nil {
 			return n, err

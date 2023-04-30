@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"unsafe"
 )
 
 type dnsRespCode uint8
@@ -49,7 +50,7 @@ const (
 //
 // You see these in the "Question" section of a DNS query.
 type dnsQuestion struct {
-	Labels [][]byte
+	Labels []string
 	Type   dnsType
 	Class  dnsClass
 }
@@ -59,7 +60,7 @@ type dnsQuestion struct {
 // These are used for answers to queries (see dnsQuestion), name server
 // authority information, and additional records.
 type dnsRecord struct {
-	Labels [][]byte
+	Labels []string
 	Type   dnsType
 	Class  dnsClass
 	TTL    uint32
@@ -88,8 +89,14 @@ type dnsMessage struct {
 	Additional []dnsRecord
 }
 
+// byteSliceAsString performs unsafe conversions from a byte slice to a string.
+func byteSliceAsString(b []byte) string {
+	// As seen in strings.Builder
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
 // parseLabels parses labels in a message.
-func parseLabels(msg, buf []byte, depth int) (labels [][]byte, size int, err error) {
+func parseLabels(msg, buf []byte, depth int) (labels []string, size int, err error) {
 	for len(buf) > 0 {
 		if buf[0] == 0 {
 			size++
@@ -113,7 +120,6 @@ func parseLabels(msg, buf []byte, depth int) (labels [][]byte, size int, err err
 			if err != nil {
 				return labels, size, fmt.Errorf("resolve 0x%04x: %w", length, err)
 			}
-			buf = buf[2:]
 			labels = append(labels, lbls...)
 			size += 2
 
@@ -127,7 +133,7 @@ func parseLabels(msg, buf []byte, depth int) (labels [][]byte, size int, err err
 			return labels, size, errors.New("length too long")
 		}
 
-		labels = append(labels, buf[1:length+1])
+		labels = append(labels, byteSliceAsString(buf[1:length+1]))
 		buf = buf[length+1:]
 		size += length + 1
 	}

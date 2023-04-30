@@ -6,26 +6,52 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"sync"
 )
 
+// Server implements a basic DNS server that attempts to resolve for Pikonet
+// first, but then falls back on other DNS servers.
+type Server struct {
+	// Fallback holds a fallback DNS server.
+	//
+	// Fallback is used when a Pikonet address returns no results.
+	// If empty, then queries that reach this point return NXDOMAIN.
+	Fallback string
+
+	// Resolve is the function called when a DNS query is received.
+	// If nil, then the server essentially acts as a proxy to the fallback
+	// DNS servers.
+	Resolve func(query []string) (result net.IP, ok bool)
+
+	// Suffix holds the domain suffix (such as "com" for a domain that is
+	// or ends with ".com").
+	// When a query that matches this suffix is received, then the query
+	// calls Resolve.
+	//
+	// If empty, then the server essentially acts as a proxy to the
+	// fallback DNS servers.
+	Suffix []string
+}
+
 var (
-	ourSuffix = [][]byte{
-		[]byte("pn"),
-		[]byte("local"),
+	bbufPool = sync.Pool{
+		New: func() any {
+			return &bytes.Buffer{}
+		},
 	}
 )
 
-// canResolve returns true if the value of ourSuffix is found at the end of
+// canResolve returns true if the value of our suffix is found at the end of
 // labels.
-func canResolve(labels [][]byte) bool {
-	if len(labels) < len(ourSuffix) {
+func (s *Server) canResolve(labels []string) bool {
+	if len(labels) < len(s.Suffix) {
 		return false
 	}
 
-	labels = labels[len(labels)-len(ourSuffix):]
+	labels = labels[len(labels)-len(s.Suffix):]
 
-	for i := 0; i < len(ourSuffix); i++ {
-		if !bytes.Equal(labels[i], ourSuffix[i]) {
+	for i := 0; i < len(s.Suffix); i++ {
+		if labels[i] != s.Suffix[i] {
 			return false
 		}
 	}
@@ -33,70 +59,118 @@ func canResolve(labels [][]byte) bool {
 	return true
 }
 
-func sendServerFail(uc *net.UDPConn, addr *net.UDPAddr, msg dnsMessage, code dnsRespCode) {
-	buf := &bytes.Buffer{}
+// fail sends an error message to the client.
+func (s *Server) fail(uc *net.UDPConn, addr *net.UDPAddr, msg dnsMessage, code dnsRespCode) error {
+	buf := bbufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bbufPool.Put(buf)
 
 	retMsg := dnsMessage{
 		ID:        msg.ID,
 		QR:        false,
+		RA:        true,
 		Opcode:    opQuery,
 		Resp:      code,
 		Questions: msg.Questions,
 	}
 
 	retMsg.serialize(buf)
-	uc.WriteTo(buf.Bytes(), addr)
+
+	_, err := uc.WriteTo(buf.Bytes(), addr)
+	return err
 }
 
-func handleMessage(uc *net.UDPConn, addr *net.UDPAddr, msg dnsMessage) {
-	obuf := &bytes.Buffer{}
+// fallbackResolve attempts to resolve the DNS query using the fallback resolvers.
+// Otherwise, it returns NXDOMAIN.
+func (s *Server) fallbackResolve(uc *net.UDPConn, addr *net.UDPAddr, msg dnsMessage) error {
+	if s.Fallback == "" {
+		return s.fail(uc, addr, msg, respNXDomain)
+	}
 
+	// Reserialize the query.
+	buf := bbufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bbufPool.Put(buf)
+
+	msg.serialize(buf)
+
+	c, err := net.Dial("udp", s.Fallback)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	// Write out our message to the other end.
+	c.Write(buf.Bytes())
+
+	// TODO: Should this be a pool?
+	respBuf := make([]byte, 64*1024)
+	n, err := c.Read(respBuf)
+	if err != nil {
+		return err
+	}
+
+	// We need to parse the DNS message and notify someone
+	// if it's a valid response.
+	msg, err = parseDNSMessage(respBuf[:n])
+	if err != nil {
+		return err
+	}
+
+	buf.Reset()
+	msg.RA = true
+	msg.serialize(buf)
+	_, err = uc.WriteTo(buf.Bytes(), addr)
+	return err
+}
+
+// handleQuery handles a DNS query.
+func (s *Server) handleQuery(uc *net.UDPConn, addr *net.UDPAddr, msg dnsMessage) error {
 	if len(msg.Questions) != 1 {
 		// Literally nobody supports having more than 1 question in a
 		// query, despite the packet format supporting it.
 		// The semantics behind how return codes should be handled
 		// aren't (well) defined.
-		sendServerFail(uc, addr, msg, respFormatErr)
-		return
+		//
+		// Also, we will fail zero queries.
+		return s.fail(uc, addr, msg, respFormatErr)
 	}
 
-	if canResolve(msg.Questions[0].Labels) {
-		sendServerFail(uc, addr, msg, respNXDomain)
-		return
+	// Determine if we can't handle this query.
+	if msg.Questions[0].Type != typeAAAA && s.canResolve(msg.Questions[0].Labels) {
+		// Domain found but no A record.
+		return s.fail(uc, addr, msg, respOk)
+	} else if !s.canResolve(msg.Questions[0].Labels) || s.Resolve == nil {
+		return s.fallbackResolve(uc, addr, msg)
 	}
 
-	c, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(1, 1, 1, 1), Port: 53})
-	if err != nil {
-		sendServerFail(uc, addr, msg, respServerFail)
-		return
-	}
-	defer c.Close()
+	// We can handle this query.
+	buf := bbufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bbufPool.Put(buf)
 
-	msg.serialize(obuf)
-	c.Write(obuf.Bytes())
-	obuf.Reset()
-
-	buf := make([]byte, 64*1024)
-	n, err := c.Read(buf)
-	if err != nil {
-		sendServerFail(uc, addr, msg, respServerFail)
-		return
+	result, ok := s.Resolve(msg.Questions[0].Labels[:len(msg.Questions[0].Labels)-len(s.Suffix)])
+	if !ok {
+		return s.fail(uc, addr, msg, respNXDomain)
 	}
 
-	buf = buf[:n]
+	msg.Answers = append(msg.Answers, dnsRecord{
+		Labels: msg.Questions[0].Labels,
+		Type:   msg.Questions[0].Type,
+		Class:  msg.Questions[0].Class,
+		TTL:    600, // TODO
+		RData:  []byte(result),
+	})
+	msg.QR = false
+	msg.RA = true
 
-	nmsg, err := parseDNSMessage(buf)
-	if err != nil {
-		sendServerFail(uc, addr, msg, respFormatErr)
-		return
-	}
-
-	nmsg.serialize(obuf)
-	uc.WriteTo(obuf.Bytes(), addr)
+	msg.serialize(buf)
+	_, err := uc.WriteTo(buf.Bytes(), addr)
+	return err
 }
 
-func Listen() error {
-	uc, err := net.ListenUDP("udp4", nil)
+func (s *Server) Listen(addr *net.UDPAddr) error {
+	uc, err := net.ListenUDP("udp4", addr)
 	if err != nil {
 		return err
 	}
@@ -104,6 +178,7 @@ func Listen() error {
 
 	fmt.Println(uc.LocalAddr())
 
+	// TODO: Can this be done better?
 	buf := make([]byte, 64*1024)
 	for {
 		n, addr, err := uc.ReadFrom(buf)
@@ -111,13 +186,20 @@ func Listen() error {
 			return err
 		}
 
-		buf := buf[:n]
-		msg, err := parseDNSMessage(buf)
-		if err != nil {
-			sendServerFail(uc, addr.(*net.UDPAddr), msg, respFormatErr)
-			continue
-		}
+		nbuf := bbufPool.Get().(*bytes.Buffer)
+		nbuf.Reset()
+		nbuf.Write(buf[:n])
 
-		handleMessage(uc, addr.(*net.UDPAddr), msg)
+		go func() {
+			defer bbufPool.Put(nbuf)
+
+			msg, err := parseDNSMessage(nbuf.Bytes())
+			if err != nil {
+				s.fail(uc, addr.(*net.UDPAddr), msg, respFormatErr)
+				return
+			}
+
+			s.handleQuery(uc, addr.(*net.UDPAddr), msg)
+		}()
 	}
 }

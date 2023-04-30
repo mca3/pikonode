@@ -27,7 +27,7 @@ func TestParse(t *testing.T) {
 				Qdcount: 1,
 				Questions: []dnsQuestion{
 					{
-						Labels: [][]byte{[]byte("example"), []byte("com")},
+						Labels: []string{"example", "com"},
 						Type:   typeA,
 						Class:  classIN,
 					},
@@ -54,14 +54,14 @@ func TestParse(t *testing.T) {
 				Ancount: 1,
 				Questions: []dnsQuestion{
 					{
-						Labels: [][]byte{[]byte("example"), []byte("com")},
+						Labels: []string{"example", "com"},
 						Type:   typeA,
 						Class:  classIN,
 					},
 				},
 				Answers: []dnsRecord{
 					{
-						Labels: [][]byte{[]byte("example"), []byte("com")},
+						Labels: []string{"example", "com"},
 						Type:   typeA,
 						Class:  classIN,
 						TTL:    80762,

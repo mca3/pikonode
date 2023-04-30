@@ -212,7 +212,7 @@ func getConnNw(id int64) (*api.Network, int) {
 func joinNetwork(ctx context.Context, nwid int64) {
 	nw, err := rv.Network(ctx, nwid)
 	if err != nil {
-		log.Printf("failed to fetch networks: %v", nwid, err)
+		log.Printf("failed to fetch networks: %v", err)
 		return
 	}
 
