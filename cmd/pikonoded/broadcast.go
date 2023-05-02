@@ -77,9 +77,11 @@ func onDiscovMessage(addr *net.UDPAddr, msg discov.Message) {
 
 	// Determine if we want to connect to them
 	// TODO: Determine if an existing connection is good and ignore this?
-	// TODO: This is racy.
+	eng.Lock()
+	defer eng.Unlock()
+
 	ok := false
-	for _, v := range peerList {
+	for _, v := range eng.Peers() {
 		if v.PublicKey == msg.Key {
 			ok = true
 			break

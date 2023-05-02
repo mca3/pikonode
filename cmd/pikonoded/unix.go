@@ -56,6 +56,8 @@ func bindUnix(ctx context.Context) error {
 				go handle(c)
 			}
 		}()
+
+		log.Printf("UNIX socket is at %v", unixSocket)
 	*/
 
 	return nil

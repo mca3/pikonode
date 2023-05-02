@@ -60,18 +60,6 @@ func NewEngine(cfg Config) (*Engine, error) {
 		gw: make(chan api.GatewayMsg, 100),
 	}
 
-	// Try to get our device
-	dev, err := e.api.Device(context.TODO(), cfg.DeviceID)
-	if err != nil {
-		close(e.gw)
-		return nil, fmt.Errorf("failed to fetch our device: %w", err)
-	}
-
-	e.ourDevice = dev
-
-	go e.api.Gateway(context.TODO(), e.gw, dev.ID, cfg.ListenPort)
-	go e.handleGateway(context.TODO())
-
 	return e, nil
 }
 
@@ -98,7 +86,9 @@ func (e *Engine) fetchNetwork(id int64) *api.Network {
 
 // rebuildState fully rebuilds the state objects.
 func (e *Engine) rebuildState() {
-	// Assuming we're still locked.
+	e.Lock()
+	defer e.Unlock()
+
 	e.nwState = e.nwState[:0]
 
 	nws, err := e.api.Networks(context.TODO())
@@ -342,6 +332,22 @@ func (e *Engine) handleUpdate(dev *api.Device) {
 	for _, v := range e.onUpdate {
 		v(dev)
 	}
+}
+
+// Connect attempts to connect to the Rendezvous server.
+func (e *Engine) Connect() error {
+	// Try to get our device
+	dev, err := e.api.Device(context.TODO(), e.cfg.DeviceID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch our device: %w", err)
+	}
+
+	e.ourDevice = dev
+
+	go e.api.Gateway(context.TODO(), e.gw, dev.ID, e.cfg.ListenPort)
+	go e.handleGateway(context.TODO())
+
+	return nil
 }
 
 // Peers returns a list of peers that this device has.
