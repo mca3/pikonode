@@ -9,8 +9,8 @@ import (
 	"os"
 
 	"github.com/mca3/pikonode/api"
-	"github.com/mca3/pikonode/cmd/pikonoded/wg"
 	"github.com/mca3/pikonode/internal/config"
+	"github.com/mca3/pikonode/net/wg"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

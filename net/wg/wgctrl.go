@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/mca3/pikonode/cmd/pikonoded/ifctl"
+	"github.com/mca3/pikonode/net/ifctl"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"

@@ -6,9 +6,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/mca3/pikonode/cmd/pikonoded/wg"
 	"github.com/mca3/pikonode/internal/config"
 	"github.com/mca3/pikonode/net/discov"
+	"github.com/mca3/pikonode/net/wg"
 )
 
 var discovConn *discov.Discovery
