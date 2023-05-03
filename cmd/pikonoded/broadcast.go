@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/mca3/pikonode/internal/config"
@@ -11,9 +12,51 @@ import (
 	"github.com/mca3/pikonode/net/wg"
 )
 
+type discovPeer struct {
+	LastSeen time.Time
+	Endpoint string
+}
+
+const (
+	// Controls the amount of time since a HELLO we will consider a local
+	// peer as alive.
+	//
+	// When time.Now().Add(discovGracePeriod).Before(peer.LastSeen), the
+	// discovPeer is valid.
+	discovGracePeriod = time.Minute * 2
+)
+
 var discovConn *discov.Discovery
 
 var discovHelloTicker = time.NewTicker(time.Minute)
+
+// seenPeers holds all local peers that have sent a HELLO.
+// seenPeers is protected by seenMut.
+//
+// TODO: Should we GC occasionally?
+var seenPeers = map[string]discovPeer{}
+var seenMut sync.Mutex
+
+// Valid returns true if the peer has sent a HELLO recently.
+func (d discovPeer) Valid() bool {
+	return time.Now().Add(discovGracePeriod).Before(d.LastSeen)
+}
+
+// localPeer looks up the specified public key to determine if a peer has sent
+// a HELLO on the local network, and if it has done so recently, will return
+// the peer's information and true.
+func localPeer(key string) (discovPeer, bool) {
+	seenMut.Lock()
+	defer seenMut.Unlock()
+
+	for k, v := range seenPeers {
+		if k == key && v.Valid() {
+			return v, true
+		}
+	}
+
+	return discovPeer{}, false
+}
 
 // listenBroadcast listens for discovery packets on the local interface.
 func listenBroadcast(ctx context.Context) error {
@@ -75,6 +118,16 @@ func onDiscovMessage(addr *net.UDPAddr, msg discov.Message) {
 		sendDiscovHello(true)
 	}
 
+	// The address of the WireGuard connection is the address of the
+	// message that we have received this from, except with the port set to
+	// the one specified in the message.
+	addr.Port = int(msg.Port)
+
+	// Add them to the cache
+	seenMut.Lock()
+	seenPeers[msg.Key] = discovPeer{LastSeen: time.Now(), Endpoint: addr.String()}
+	seenMut.Unlock()
+
 	// Determine if we want to connect to them
 	// TODO: Determine if an existing connection is good and ignore this?
 	eng.Lock()
@@ -100,8 +153,9 @@ func onDiscovMessage(addr *net.UDPAddr, msg discov.Message) {
 		return
 	}
 
-	addr.Port = int(msg.Port)
-
+	// Add the new peer.
+	// Note that often during startup this will get overridden, so this
+	// isn't the only place where peers are set when discovered locally.
 	wgLock.Lock()
 	wgDev.AddPeer(nil, addr, pkey)
 	wgLock.Unlock()

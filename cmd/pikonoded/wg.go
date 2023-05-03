@@ -121,8 +121,15 @@ func wgUpdatePeers() {
 			continue
 		}
 
+		// Use the locally discovered endpoint if we have one
+		endpoint := v.Endpoint
+		if lp, ok := localPeer(v.PublicKey); ok {
+			endpoint = lp.Endpoint
+		}
+
 		log.Printf("adding peer %s", v.IP)
-		wgDev.AddPeer(mustParseIPNet(v.IP), mustParseUDPAddr(v.Endpoint), key)
+
+		wgDev.AddPeer(mustParseIPNet(v.IP), mustParseUDPAddr(endpoint), key)
 	}
 
 	// Copy new peer list
