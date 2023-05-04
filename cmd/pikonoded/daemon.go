@@ -169,6 +169,10 @@ func startup(ctx context.Context) error {
 		return fmt.Errorf("failed to start wireguard: %w", err)
 	}
 
+	go func() {
+		log.Print(listenDNS())
+	}()
+
 	wgLock.Lock()
 	wgDev.SetState(true)
 	wgLock.Unlock()
@@ -177,6 +181,11 @@ func startup(ctx context.Context) error {
 	eng.OnLeave(wgOnLeave)
 	eng.OnUpdate(wgOnUpdate)
 	eng.OnRebuild(wgOnRebuild)
+
+	eng.OnJoin(dnsOnJoin)
+	eng.OnLeave(dnsOnLeave)
+	eng.OnUpdate(dnsOnUpdate)
+	eng.OnRebuild(dnsOnRebuild)
 
 	if err := eng.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to Rendezvous server: %w", err)

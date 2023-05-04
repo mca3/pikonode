@@ -4,7 +4,6 @@ package dns
 
 import (
 	"bytes"
-	"fmt"
 	"net"
 	"sync"
 )
@@ -175,8 +174,6 @@ func (s *Server) Listen(addr *net.UDPAddr) error {
 		return err
 	}
 	defer uc.Close()
-
-	fmt.Println(uc.LocalAddr())
 
 	// TODO: Can this be done better?
 	buf := make([]byte, 64*1024)
