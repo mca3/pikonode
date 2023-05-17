@@ -62,6 +62,11 @@ func From(name string) (Interface, error) {
 	return &li, nil
 }
 
+// Name returns the name of the interface.
+func (li *linuxInterface) Name() string {
+	return li.linkAttrs.Name
+}
+
 // Set sets the state of the interface to be up or down.
 func (li *linuxInterface) Set(state bool) error {
 	if state {

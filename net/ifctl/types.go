@@ -7,6 +7,9 @@ import (
 )
 
 type Interface interface {
+	// Name returns the name of the interface.
+	Name() string
+
 	// Set sets the state of the interface to be up or down.
 	Set(state bool) error
 

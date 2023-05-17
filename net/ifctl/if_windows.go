@@ -10,6 +10,7 @@ import (
 
 // winInterface implements support for Windows network adapters.
 type winInterface struct {
+	name   string
 	luid   winipcfg.LUID
 	ad     *driver.Adapter
 	routes []*winipcfg.RouteData
@@ -32,6 +33,7 @@ func New(name string) (Interface, error) {
 	return &winInterface{
 		ad:   ad,
 		luid: ad.LUID(),
+		name: name,
 	}, nil
 }
 
@@ -45,7 +47,13 @@ func From(name string) (Interface, error) {
 	return &winInterface{
 		ad:   ad,
 		luid: ad.LUID(),
+		name: name,
 	}, nil
+}
+
+// Name returns the name of the interface.
+func (wi *winInterface) Name() string {
+	return wi.Name
 }
 
 // Set sets the state of the interface to be up or down.

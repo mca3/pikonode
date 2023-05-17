@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/mca3/pikonode/net/ifctl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -43,6 +44,9 @@ type Device interface {
 	// If the public key is not found in an existing peer, this function
 	// does nothing.
 	RemovePeer(publicKey wgtypes.Key) error
+
+	// Interface returns the underlying interface.
+	Interface() ifctl.Interface
 
 	// Close closes the WireGuard interface and cleans up.
 	Close() error

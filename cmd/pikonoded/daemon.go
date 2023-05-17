@@ -15,6 +15,7 @@ import (
 
 	"github.com/mca3/pikonode/api"
 	"github.com/mca3/pikonode/internal/config"
+	"github.com/mca3/pikonode/net/dns/resolvconf"
 	"github.com/mca3/pikonode/net/wg"
 	"github.com/mca3/pikonode/piko"
 )
@@ -138,6 +139,26 @@ func startPikopunch(ctx context.Context) error {
 	return nil
 }
 
+func bringupDns() {
+	cfg, err := resolvconf.FetchCurrentConfig()
+	if err != nil {
+		log.Printf("unable to fetch current DNS configuration: %v")
+		return
+	}
+	cfg.AddNameserver("127.0.0.1")
+
+	if err := resolvconf.SetDNS(wgDev.Interface(), cfg); err != nil {
+		log.Printf("unable to set DNS configuration: %v", err)
+		return
+	}
+}
+
+func takedownDns() {
+	if err := resolvconf.UnsetDNS(wgDev.Interface()); err != nil {
+		log.Printf("unable to unset DNS configuration: %v", err)
+	}
+}
+
 func startup(ctx context.Context) error {
 	if err := config.ReadConfigFile(); err != nil {
 		return fmt.Errorf("failed to load config file: %w", err)
@@ -195,6 +216,8 @@ func startup(ctx context.Context) error {
 		return err
 	}
 
+	bringupDns()
+
 	// Introduce ourselves now that we're all set up
 	go listenBroadcast(ctx)
 
@@ -224,6 +247,8 @@ done:
 	log.Printf("Exiting.")
 
 	if wgDev != nil {
+		takedownDns()
+
 		wgLock.Lock()
 		wgDev.SetState(false)
 		wgDev.Close()

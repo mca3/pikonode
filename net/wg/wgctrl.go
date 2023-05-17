@@ -203,6 +203,11 @@ func (w *wgctrlWireguard) RemovePeer(publicKey wgtypes.Key) error {
 	})
 }
 
+// Interface returns the underlying interface.
+func (w *wgctrlWireguard) Interface() ifctl.Interface {
+	return w.ifc
+}
+
 // Close closes the WireGuard interface and cleans up.
 func (w *wgctrlWireguard) Close() error {
 	if err := w.wgc.Close(); err != nil {
